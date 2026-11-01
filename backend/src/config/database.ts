@@ -1,12 +1,34 @@
 import mongoose from "mongoose";
 
-export async function connectDatabase() {
+let dbConnected = false;
+
+export function isDatabaseConnected(): boolean {
+  return dbConnected && mongoose.connection.readyState === 1;
+}
+
+export async function connectDatabase(): Promise<boolean> {
   const uri = process.env.MONGODB_URI;
 
   if (!uri) {
-    throw new Error("MONGODB_URI is required");
+    console.warn(
+      "⚠️  MONGODB_URI is not set. Running with in-memory fallback storage until MongoDB is configured."
+    );
+    dbConnected = false;
+    return false;
   }
 
-  await mongoose.connect(uri);
-  console.log("MongoDB connected");
+  try {
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 3000,
+    });
+    dbConnected = true;
+    console.log("✅ MongoDB connected:", uri);
+    return true;
+  } catch (error) {
+    dbConnected = false;
+    console.warn(
+      "⚠️  Could not connect to MongoDB (database may not be set up or running yet). Falling back to in-memory storage."
+    );
+    return false;
+  }
 }

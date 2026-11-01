@@ -74,7 +74,7 @@ const DailyLogSchema = new Schema<IDailyLog>(
     totalCount: { type: Number, default: 0 },
     completionPercentage: { type: Number, default: 0 },
     shadeLevel: { type: Number, enum: [0, 1, 2, 3, 4], default: 0 },
-    shadeColor: { type: String, default: "#161b22" },
+    shadeColor: { type: String, default: "#21262d" },
     shadeLabel: { type: String, default: "No habits completed" },
     notes: { type: String, default: "" },
   },

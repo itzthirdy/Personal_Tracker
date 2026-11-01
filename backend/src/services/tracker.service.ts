@@ -524,11 +524,63 @@ export async function getConsistencyStats() {
       ? Math.round((totalTasksCompleted / totalTasksAssigned) * 100)
       : 0;
 
+  // Calculate current streak of active days (days with >= 1 completed habit)
+  const activeDatesDesc = allLogs
+    .filter((l) => l.completedCount > 0)
+    .map((l) => l.date)
+    .sort((a, b) => b.localeCompare(a));
+
+  let currentStreak = 0;
+  if (activeDatesDesc.length > 0) {
+    currentStreak = 1;
+    for (let i = 0; i < activeDatesDesc.length - 1; i++) {
+      const curr = new Date(`${activeDatesDesc[i]}T00:00:00Z`).getTime();
+      const prev = new Date(`${activeDatesDesc[i + 1]}T00:00:00Z`).getTime();
+      const diffDays = Math.round((curr - prev) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        currentStreak++;
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Calculate weekly completion rate across the last 7 tracked logs (or all if < 7)
+  const recentLogs = allLogs.slice(-7);
+  const recentCompleted = recentLogs.reduce((sum, l) => sum + l.completedCount, 0);
+  const recentTotal = recentLogs.reduce((sum, l) => sum + l.totalCount, 0);
+  const weeklyCompletionRate =
+    recentTotal > 0 ? Math.round((recentCompleted / recentTotal) * 100) : 0;
+
+  // Calculate best day of the week by average completion percentage
+  const dayStats = new Map<DayOfWeek, { totalPct: number; count: number }>();
+  for (const log of allLogs) {
+    if (log.completedCount > 0) {
+      const entry = dayStats.get(log.dayOfWeek) ?? { totalPct: 0, count: 0 };
+      entry.totalPct += log.completionPercentage;
+      entry.count += 1;
+      dayStats.set(log.dayOfWeek, entry);
+    }
+  }
+
+  let bestDayOfWeek = "—";
+  let bestAvg = -1;
+  for (const [day, stat] of dayStats.entries()) {
+    const avg = stat.totalPct / stat.count;
+    if (avg > bestAvg) {
+      bestAvg = avg;
+      bestDayOfWeek = day.charAt(0).toUpperCase() + day.slice(1);
+    }
+  }
+
   return {
     storageMode: isDatabaseConnected() ? "mongodb" : "in-memory-fallback",
     totalDaysTracked,
     activeDays,
     perfectDays,
+    currentStreak,
+    weeklyCompletionRate,
+    bestDayOfWeek,
     totalTasksCompleted,
     totalTasksAssigned,
     overallCompletionPercentage,

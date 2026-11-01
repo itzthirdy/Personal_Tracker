@@ -45,7 +45,7 @@ export interface GithubShadeInfo {
 export const GITHUB_GREEN_SHADES: Record<0 | 1 | 2 | 3 | 4, GithubShadeInfo> = {
   0: {
     level: 0,
-    color: "#161b22",
+    color: "#21262d",
     label: "No habits completed",
   },
   1: {

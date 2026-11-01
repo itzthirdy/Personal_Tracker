@@ -22,5 +22,6 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", trackerRoutes);
+app.use("/api/tracker", trackerRoutes);
 
 export default app;

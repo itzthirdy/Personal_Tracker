@@ -1,4 +1,4 @@
-# Audrolics Monorepo
+# Personal Tracker
 
 ## Structure
 - \`frontend/\`: Next.js (App Router, Tailwind CSS, TypeScript)

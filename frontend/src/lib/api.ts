@@ -1,5 +1,7 @@
 import {
   computeGithubShade,
+  type AuthResponse,
+  type AuthUser,
   type CalendarDaySummary,
   type ConsistencyStats,
   type DailyChecklistItem,
@@ -7,10 +9,230 @@ import {
   type DayOfWeek,
   type HabitCategory,
   type MonthlyCalendarResponse,
+  type WorkspaceCard,
+  type WorkspaceCardStatus,
+  type WorkspaceModuleKey,
 } from "@/types/tracker";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/tracker";
+const API_ROOT =
+  process.env.NEXT_PUBLIC_API_ROOT ?? "http://localhost:8000/api";
+const TRACKER_API = `${API_ROOT}/tracker`;
+
+const TOKEN_STORAGE_KEY = "personal_tracker_jwt";
+const USER_STORAGE_KEY = "personal_tracker_user";
+
+export function getStoredToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function getStoredUser(): AuthUser | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(USER_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AuthUser;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAuthSession(token: string, user: AuthUser) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  window.localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+}
+
+export function clearAuthSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  window.localStorage.removeItem(USER_STORAGE_KEY);
+}
+
+function getAuthHeaders(extraHeaders?: Record<string, string>): HeadersInit {
+  const token = getStoredToken();
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extraHeaders,
+  };
+}
+
+// ==========================================
+// 1. Auth API
+// ==========================================
+
+export async function apiRegister(
+  username: string,
+  email: string,
+  password: string
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_ROOT}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, email, password }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error ?? "Registration failed");
+  }
+  saveAuthSession(data.token, data.user);
+  return data as AuthResponse;
+}
+
+export async function apiLogin(
+  identifier: string,
+  password: string
+): Promise<AuthResponse> {
+  const res = await fetch(`${API_ROOT}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier, password }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error ?? "Login failed");
+  }
+  saveAuthSession(data.token, data.user);
+  return data as AuthResponse;
+}
+
+export async function apiGetMe(): Promise<AuthUser> {
+  const res = await fetch(`${API_ROOT}/auth/me`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error("Unauthorized");
+  }
+  const data = (await res.json()) as { user: AuthUser };
+  return data.user;
+}
+
+// ==========================================
+// 2. Workspace Hub API (Notion-style Cards)
+// ==========================================
+
+export function getFallbackWorkspaceCards(): WorkspaceCard[] {
+  return [
+    {
+      id: "fallback-habits",
+      userId: "local",
+      title: "Routine & Habit Tracker",
+      moduleKey: "habits",
+      icon: "target",
+      coverImage:
+        "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?auto=format&fit=crop&w=1200&q=80",
+      route: "/dashboard/habits",
+      order: 1,
+      status: "active",
+      livePreview: {
+        consistencyScore: 0,
+        currentStreak: 0,
+        todayProgress: {
+          completedCount: 0,
+          totalCount: 10,
+          completionPercentage: 0,
+        },
+      },
+    },
+    {
+      id: "fallback-finances",
+      userId: "local",
+      title: "Finances",
+      moduleKey: "finances",
+      icon: "wallet",
+      coverImage:
+        "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1200&q=80",
+      route: "/dashboard/finances",
+      order: 2,
+      status: "coming_soon",
+      livePreview: { subtitle: "Coming Soon" },
+    },
+    {
+      id: "fallback-exercise",
+      userId: "local",
+      title: "Exercise",
+      moduleKey: "exercise",
+      icon: "dumbbell",
+      coverImage:
+        "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80",
+      route: "/dashboard/exercise",
+      order: 3,
+      status: "coming_soon",
+      livePreview: { subtitle: "Coming Soon" },
+    },
+  ];
+}
+
+export async function fetchWorkspaceHub(): Promise<WorkspaceCard[]> {
+  const res = await fetch(`${API_ROOT}/hub`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch workspace hub: ${res.status}`);
+  }
+  const data = (await res.json()) as { cards: WorkspaceCard[] };
+  return data.cards;
+}
+
+export async function apiCreateWorkspaceCard(input: {
+  title: string;
+  icon?: string;
+  coverImage?: string;
+  route?: string;
+  moduleKey?: WorkspaceModuleKey;
+  status?: WorkspaceCardStatus;
+}): Promise<WorkspaceCard> {
+  const res = await fetch(`${API_ROOT}/hub/cards`, {
+    method: "POST",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create workspace card: ${res.status}`);
+  }
+  const data = (await res.json()) as { card: WorkspaceCard };
+  return data.card;
+}
+
+export async function apiUpdateWorkspaceCard(
+  cardId: string,
+  updates: Partial<{
+    title: string;
+    icon: string;
+    coverImage: string;
+    order: number;
+    status: WorkspaceCardStatus;
+  }>
+): Promise<WorkspaceCard> {
+  const res = await fetch(`${API_ROOT}/hub/cards/${cardId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update workspace card: ${res.status}`);
+  }
+  const data = (await res.json()) as { card: WorkspaceCard };
+  return data.card;
+}
+
+export async function apiDeleteWorkspaceCard(cardId: string): Promise<void> {
+  const res = await fetch(`${API_ROOT}/hub/cards/${cardId}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to delete workspace card: ${res.status}`);
+  }
+}
+
+// ==========================================
+// 3. Routine & Habit Tracker API
+// ==========================================
 
 const DAYS_OF_WEEK: DayOfWeek[] = [
   "sunday",
@@ -22,7 +244,6 @@ const DAYS_OF_WEEK: DayOfWeek[] = [
   "saturday",
 ];
 
-// Client-side fallback templates matching the backend schedule in case the backend isn't running yet
 const FALLBACK_TEMPLATES: Record<
   DayOfWeek,
   Array<{ id: string; title: string; category: HabitCategory; order: number }>
@@ -182,9 +403,13 @@ export async function fetchMonthlyCalendar(
   year: number,
   month: number
 ): Promise<MonthlyCalendarResponse> {
-  const res = await fetch(`${API_BASE}/calendar?year=${year}&month=${month}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${TRACKER_API}/calendar?year=${year}&month=${month}`,
+    {
+      headers: getAuthHeaders(),
+      cache: "no-store",
+    }
+  );
   if (!res.ok) {
     throw new Error(`Failed to fetch calendar: ${res.status}`);
   }
@@ -192,7 +417,8 @@ export async function fetchMonthlyCalendar(
 }
 
 export async function fetchDailyLog(date: string): Promise<DailyLog> {
-  const res = await fetch(`${API_BASE}/logs/${date}`, {
+  const res = await fetch(`${TRACKER_API}/logs/${date}`, {
+    headers: getAuthHeaders(),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -203,7 +429,8 @@ export async function fetchDailyLog(date: string): Promise<DailyLog> {
 }
 
 export async function fetchStats(): Promise<ConsistencyStats> {
-  const res = await fetch(`${API_BASE}/stats`, {
+  const res = await fetch(`${TRACKER_API}/stats`, {
+    headers: getAuthHeaders(),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -217,9 +444,9 @@ export async function apiToggleHabitItem(
   itemId: string,
   completed: boolean
 ): Promise<DailyLog> {
-  const res = await fetch(`${API_BASE}/logs/${date}/items/${itemId}`, {
+  const res = await fetch(`${TRACKER_API}/logs/${date}/items/${itemId}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ completed }),
   });
   if (!res.ok) {
@@ -233,9 +460,9 @@ export async function apiSetAllHabitItems(
   date: string,
   completed: boolean
 ): Promise<DailyLog> {
-  const res = await fetch(`${API_BASE}/logs/${date}/check-all`, {
+  const res = await fetch(`${TRACKER_API}/logs/${date}/check-all`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ completed }),
   });
   if (!res.ok) {
@@ -250,9 +477,9 @@ export async function apiAddCustomHabitItem(
   title: string,
   category: HabitCategory
 ): Promise<DailyLog> {
-  const res = await fetch(`${API_BASE}/logs/${date}/items`, {
+  const res = await fetch(`${TRACKER_API}/logs/${date}/items`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ title, category }),
   });
   if (!res.ok) {
@@ -266,8 +493,9 @@ export async function apiRemoveHabitItem(
   date: string,
   itemId: string
 ): Promise<DailyLog> {
-  const res = await fetch(`${API_BASE}/logs/${date}/items/${itemId}`, {
+  const res = await fetch(`${TRACKER_API}/logs/${date}/items/${itemId}`, {
     method: "DELETE",
+    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     throw new Error(`Failed to delete item: ${res.status}`);
@@ -275,4 +503,3 @@ export async function apiRemoveHabitItem(
   const data = (await res.json()) as { log: DailyLog };
   return data.log;
 }
-

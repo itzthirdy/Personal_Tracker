@@ -18,6 +18,52 @@ export type DayOfWeek =
 
 export type ShadeLevel = 0 | 1 | 2 | 3 | 4;
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  createdAt?: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+}
+
+export type WorkspaceModuleKey = "habits" | "finances" | "exercise" | "custom";
+export type WorkspaceCardStatus = "active" | "coming_soon";
+
+export interface HabitsLivePreview {
+  consistencyScore: number;
+  currentStreak: number;
+  todayProgress: {
+    completedCount: number;
+    totalCount: number;
+    completionPercentage: number;
+  };
+}
+
+export interface ComingSoonLivePreview {
+  subtitle: string;
+}
+
+export type WorkspaceCardLivePreview =
+  | HabitsLivePreview
+  | ComingSoonLivePreview;
+
+export interface WorkspaceCard {
+  id: string;
+  userId: string;
+  title: string;
+  moduleKey: WorkspaceModuleKey;
+  icon: string;
+  coverImage: string;
+  route: string;
+  order: number;
+  status: WorkspaceCardStatus;
+  livePreview: WorkspaceCardLivePreview;
+}
+
 export interface DailyChecklistItem {
   id: string;
   title: string;
@@ -139,4 +185,3 @@ export function computeGithubShade(
     percentage,
   };
 }
-

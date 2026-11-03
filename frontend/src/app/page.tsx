@@ -1,513 +1,158 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import HeatmapCalendar from "@/components/HeatmapCalendar";
-import DailyChecklist from "@/components/DailyChecklist";
-import {
-  apiAddCustomHabitItem,
-  apiRemoveHabitItem,
-  apiSetAllHabitItems,
-  apiToggleHabitItem,
-  buildFallbackCalendar,
-  buildFallbackDailyLog,
-  fetchDailyLog,
-  fetchMonthlyCalendar,
-  fetchStats,
-} from "@/lib/api";
-import {
-  computeGithubShade,
-  type ConsistencyStats,
-  type DailyLog,
-  type HabitCategory,
-  type MonthlyCalendarResponse,
-} from "@/types/tracker";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { getStoredUser } from "@/lib/api";
+import type { AuthUser } from "@/types/tracker";
 
-function getTodayDateString(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
+export default function HomePage() {
+  const [user, setUser] = useState<AuthUser | null>(null);
 
-export default function TrackerDashboardPage() {
-  const initialDate = useMemo(() => getTodayDateString(), []);
-  const [year, setYear] = useState<number>(() =>
-    Number(initialDate.slice(0, 4))
-  );
-  const [month, setMonth] = useState<number>(() =>
-    Number(initialDate.slice(5, 7))
-  );
-  const [selectedDate, setSelectedDate] = useState<string>(initialDate);
-
-  const [calendar, setCalendar] = useState<MonthlyCalendarResponse>(() =>
-    buildFallbackCalendar(
-      Number(initialDate.slice(0, 4)),
-      Number(initialDate.slice(5, 7))
-    )
-  );
-  const [dailyLog, setDailyLog] = useState<DailyLog>(() =>
-    buildFallbackDailyLog(initialDate)
-  );
-  const [stats, setStats] = useState<ConsistencyStats | null>(null);
-  const [backendConnected, setBackendConnected] = useState<boolean>(true);
-  const [loadingLog, setLoadingLog] = useState<boolean>(false);
-
-  // Sync a DailyLog update into the current MonthlyCalendarResponse state
-  const syncLogIntoCalendar = useCallback((updatedLog: DailyLog) => {
-    setCalendar((prev) => {
-      const [logYear, logMonth, logDay] = updatedLog.date.split("-").map(Number);
-      if (prev.year !== logYear || prev.month !== logMonth) {
-        return prev;
-      }
-
-      const updatedDays = prev.days.map((d) => {
-        if (d.dayOfMonth !== logDay) return d;
-        return {
-          ...d,
-          completedCount: updatedLog.completedCount,
-          totalCount: updatedLog.totalCount,
-          completionPercentage: updatedLog.completionPercentage,
-          shadeLevel: updatedLog.shadeLevel,
-          shadeColor: updatedLog.shadeColor,
-          shadeLabel: updatedLog.shadeLabel,
-          isFullyCompleted:
-            updatedLog.totalCount > 0 &&
-            updatedLog.completedCount === updatedLog.totalCount,
-        };
-      });
-
-      const perfectDays = updatedDays.filter((d) => d.isFullyCompleted).length;
-      const activeDays = updatedDays.filter((d) => d.completedCount > 0).length;
-      const totalCompleted = updatedDays.reduce(
-        (acc, d) => acc + d.completedCount,
-        0
-      );
-      const totalScheduled = updatedDays.reduce(
-        (acc, d) => acc + d.totalCount,
-        0
-      );
-
-      return {
-        ...prev,
-        summary: {
-          perfectDays,
-          activeDays,
-          monthlyCompletionPercentage:
-            totalScheduled > 0
-              ? Math.round((totalCompleted / totalScheduled) * 100)
-              : 0,
-        },
-        days: updatedDays,
-      };
-    });
-  }, []);
-
-  // Load calendar & stats whenever year/month changes
   useEffect(() => {
-    let active = true;
-    async function loadMonthAndStats() {
-      try {
-        const [calData, statsData] = await Promise.all([
-          fetchMonthlyCalendar(year, month),
-          fetchStats(),
-        ]);
-        if (!active) return;
-        setCalendar(calData);
-        setStats(statsData);
-        setBackendConnected(true);
-      } catch {
-        if (!active) return;
-        setBackendConnected(false);
-        setCalendar(buildFallbackCalendar(year, month));
-      }
-    }
-    loadMonthAndStats();
-    return () => {
-      active = false;
-    };
-  }, [year, month]);
-
-  // Load daily checklist whenever selectedDate changes
-  useEffect(() => {
-    let active = true;
-    async function loadSelectedDay() {
-      setLoadingLog(true);
-      try {
-        const log = await fetchDailyLog(selectedDate);
-        if (!active) return;
-        setDailyLog(log);
-        syncLogIntoCalendar(log);
-        setBackendConnected(true);
-      } catch {
-        if (!active) return;
-        setBackendConnected(false);
-        const fallback = buildFallbackDailyLog(selectedDate);
-        setDailyLog(fallback);
-      } finally {
-        if (active) setLoadingLog(false);
-      }
-    }
-    loadSelectedDay();
-    return () => {
-      active = false;
-    };
-  }, [selectedDate, syncLogIntoCalendar]);
-
-  const refreshStats = useCallback(async () => {
-    try {
-      const s = await fetchStats();
-      setStats(s);
-    } catch {
-      // ignore if offline
-    }
+    setUser(getStoredUser());
   }, []);
-
-  // Optimistic toggle of a single habit item
-  const handleToggleItem = useCallback(
-    async (itemId: string, nextCompleted: boolean) => {
-      const optimisticItems = dailyLog.items.map((item) =>
-        item.id === itemId
-          ? {
-              ...item,
-              completed: nextCompleted,
-              completedAt: nextCompleted ? new Date().toISOString() : null,
-            }
-          : item
-      );
-      const completedCount = optimisticItems.filter((i) => i.completed).length;
-      const totalCount = optimisticItems.length;
-      const shade = computeGithubShade(completedCount, totalCount);
-
-      const optimisticLog: DailyLog = {
-        ...dailyLog,
-        items: optimisticItems,
-        completedCount,
-        totalCount,
-        completionPercentage: shade.percentage,
-        shadeLevel: shade.level,
-        shadeColor: shade.color,
-        shadeLabel: shade.label,
-      };
-
-      setDailyLog(optimisticLog);
-      syncLogIntoCalendar(optimisticLog);
-
-      try {
-        const serverLog = await apiToggleHabitItem(
-          selectedDate,
-          itemId,
-          nextCompleted
-        );
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        setBackendConnected(true);
-        refreshStats();
-      } catch {
-        setBackendConnected(false);
-      }
-    },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
-  );
-
-  // Optimistic check-all / uncheck-all
-  const handleSetAllItems = useCallback(
-    async (completed: boolean) => {
-      const now = completed ? new Date().toISOString() : null;
-      const optimisticItems = dailyLog.items.map((item) => ({
-        ...item,
-        completed,
-        completedAt: now,
-      }));
-      const completedCount = completed ? optimisticItems.length : 0;
-      const totalCount = optimisticItems.length;
-      const shade = computeGithubShade(completedCount, totalCount);
-
-      const optimisticLog: DailyLog = {
-        ...dailyLog,
-        items: optimisticItems,
-        completedCount,
-        totalCount,
-        completionPercentage: shade.percentage,
-        shadeLevel: shade.level,
-        shadeColor: shade.color,
-        shadeLabel: shade.label,
-      };
-
-      setDailyLog(optimisticLog);
-      syncLogIntoCalendar(optimisticLog);
-
-      try {
-        const serverLog = await apiSetAllHabitItems(selectedDate, completed);
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        setBackendConnected(true);
-        refreshStats();
-      } catch {
-        setBackendConnected(false);
-      }
-    },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
-  );
-
-  // Add custom routine/habit item
-  const handleAddCustomItem = useCallback(
-    async (title: string, category: HabitCategory) => {
-      try {
-        const serverLog = await apiAddCustomHabitItem(
-          selectedDate,
-          title,
-          category
-        );
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        setBackendConnected(true);
-        refreshStats();
-      } catch {
-        // Offline optimistic add
-        const nextOrder =
-          dailyLog.items.reduce((max, i) => Math.max(max, i.order), 0) + 1;
-        const nextItems = [
-          ...dailyLog.items,
-          {
-            id: `custom-${Date.now()}`,
-            title,
-            category,
-            completed: false,
-            completedAt: null,
-            order: nextOrder,
-          },
-        ];
-        const shade = computeGithubShade(
-          dailyLog.completedCount,
-          nextItems.length
-        );
-        const optimisticLog: DailyLog = {
-          ...dailyLog,
-          items: nextItems,
-          totalCount: nextItems.length,
-          completionPercentage: shade.percentage,
-          shadeLevel: shade.level,
-          shadeColor: shade.color,
-          shadeLabel: shade.label,
-        };
-        setDailyLog(optimisticLog);
-        syncLogIntoCalendar(optimisticLog);
-      }
-    },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
-  );
-
-  // Remove habit item
-  const handleRemoveItem = useCallback(
-    async (itemId: string) => {
-      const nextItems = dailyLog.items.filter((i) => i.id !== itemId);
-      const completedCount = nextItems.filter((i) => i.completed).length;
-      const shade = computeGithubShade(completedCount, nextItems.length);
-      const optimisticLog: DailyLog = {
-        ...dailyLog,
-        items: nextItems,
-        completedCount,
-        totalCount: nextItems.length,
-        completionPercentage: shade.percentage,
-        shadeLevel: shade.level,
-        shadeColor: shade.color,
-        shadeLabel: shade.label,
-      };
-      setDailyLog(optimisticLog);
-      syncLogIntoCalendar(optimisticLog);
-
-      try {
-        const serverLog = await apiRemoveHabitItem(selectedDate, itemId);
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        refreshStats();
-      } catch {
-        // keep optimistic state if backend offline
-      }
-    },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
-  );
-
-  // Month Navigation handlers
-  const handlePrevMonth = () => {
-    if (month === 1) {
-      setYear((y) => y - 1);
-      setMonth(12);
-    } else {
-      setMonth((m) => m - 1);
-    }
-  };
-
-  const handleNextMonth = () => {
-    if (month === 12) {
-      setYear((y) => y + 1);
-      setMonth(1);
-    } else {
-      setMonth((m) => m + 1);
-    }
-  };
-
-  const handleGoToToday = () => {
-    const today = getTodayDateString();
-    setYear(Number(today.slice(0, 4)));
-    setMonth(Number(today.slice(5, 7)));
-    setSelectedDate(today);
-  };
-
-  // Compute live banner metrics combining server stats & active calendar state
-  const bannerMetrics = useMemo(() => {
-    const currentStreak =
-      stats?.currentStreak ??
-      (dailyLog.completedCount > 0 ? 1 : 0);
-
-    const weeklyRate =
-      stats && stats.totalDaysTracked > 0
-        ? stats.weeklyCompletionRate
-        : dailyLog.completionPercentage;
-
-    const bestDay =
-      stats && stats.bestDayOfWeek && stats.bestDayOfWeek !== "—"
-        ? stats.bestDayOfWeek
-        : dailyLog.completedCount > 0
-          ? dailyLog.dayOfWeek.charAt(0).toUpperCase() +
-            dailyLog.dayOfWeek.slice(1)
-          : "Monday";
-
-    return {
-      currentStreak,
-      weeklyRate,
-      bestDay,
-    };
-  }, [stats, dailyLog]);
 
   return (
-    <div className="min-h-screen bg-[#0d1117] text-[#f0f6fc]">
-      {/* Top Navbar */}
+    <div className="min-h-screen bg-[#0d1117] text-[#f0f6fc] flex flex-col justify-between">
+      {/* Top Navigation */}
       <header className="border-b border-[#30363d] bg-[#161b22]/80 backdrop-blur sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-[#39d353] flex items-center justify-center text-[#090d16] font-extrabold text-sm shadow-[0_0_12px_rgba(57,211,83,0.45)]">
               ✓
             </div>
-            <div>
-              <h1 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                Personal Routine &amp; Habit Tracker
-              </h1>
-              <p className="text-[11px] text-gray-400 hidden sm:block">
-                GitHub-inspired consistency tracker • Monday to Sunday Schedule
-              </p>
-            </div>
+            <span className="text-base sm:text-lg font-bold text-white tracking-tight">
+              Personal Tracker
+            </span>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                backendConnected
-                  ? "bg-[#0e4429]/50 text-[#39d353] border-[#26a641]/40"
-                  : "bg-[#801E0F]/40 text-amber-300 border-[#991b1b]"
-              }`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  backendConnected ? "bg-[#39d353]" : "bg-amber-400"
-                }`}
-              />
-              {backendConnected ? "API Connected" : "Local Preview Mode"}
-            </span>
+          <div className="flex items-center gap-3">
+            {user ? (
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#39d353] text-[#090d16] hover:bg-[#26a641] hover:text-white transition-all shadow-[0_0_12px_rgba(57,211,83,0.35)]"
+              >
+                Open My Dashboard ({user.username}) →
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-300 hover:text-white hover:bg-[#21262d] border border-[#30363d] transition-colors"
+                >
+                  Log In
+                </Link>
+                <Link
+                  href="/login?mode=register"
+                  className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#801E0F] hover:bg-[#991b1b] text-white transition-colors shadow"
+                >
+                  Get Started
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Main Content Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* 1. Top Summary Banner (3 Cards) */}
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {/* Card 1: Current Streak */}
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                Current Streak
-              </p>
-              <p className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-                {bannerMetrics.currentStreak}{" "}
-                <span className="text-base font-semibold text-gray-400">
-                  {bannerMetrics.currentStreak === 1 ? "day" : "days"}
-                </span>{" "}
-                🔥
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Keep checking off daily habits to build momentum
-              </p>
+      {/* Hero Section */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 sm:py-24 text-center flex-1 flex flex-col items-center justify-center">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#161b22] border border-[#30363d] text-xs font-medium text-[#39d353] mb-6">
+          <span className="w-2 h-2 rounded-full bg-[#39d353]" />
+          <span>Notion-Style Workspace Hub • GitHub Consistency Heatmap</span>
+        </div>
+
+        <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-white max-w-3xl leading-tight">
+          Build Daily Discipline with Visual{" "}
+          <span className="text-[#39d353]">Green-Shade</span> Consistency.
+        </h1>
+
+        <p className="mt-5 text-base sm:text-lg text-gray-400 max-w-2xl leading-relaxed">
+          Organize your life from a customizable{" "}
+          <strong className="text-gray-200">My Dashboard</strong> window hub.
+          Track your Monday–Sunday routines, workouts, school schedule, and
+          chores while watching every completed day light up your GitHub-inspired
+          calendar.
+        </p>
+
+        {/* Primary Action Flow Buttons */}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+          <Link
+            href={user ? "/dashboard" : "/login"}
+            className="px-6 py-3 rounded-xl text-sm font-bold bg-[#39d353] text-[#090d16] hover:bg-[#26a641] hover:text-white transition-all shadow-[0_0_20px_rgba(57,211,83,0.4)]"
+          >
+            {user ? "Enter My Dashboard Hub →" : "Log In to Workspace Hub →"}
+          </Link>
+
+          {!user && (
+            <Link
+              href="/login?mode=register"
+              className="px-6 py-3 rounded-xl text-sm font-semibold bg-[#161b22] text-gray-200 hover:text-white hover:bg-[#21262d] border border-[#30363d] transition-colors"
+            >
+              Create Free Account
+            </Link>
+          )}
+        </div>
+
+        {/* Visual Architecture Flow Preview Cards */}
+        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-5 w-full text-left">
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                Step 1 • Auth
+              </span>
+              <span className="text-lg">🔐</span>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-[#801E0F]/30 border border-[#991b1b]/60 flex items-center justify-center text-xl">
-              🔥
-            </div>
+            <h3 className="text-base font-bold text-white">
+              Multi-User Isolated Account
+            </h3>
+            <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+              Sign in with JWT authentication. Your weekly templates, daily
+              habit logs, and workspace cards are privately scoped to your
+              account.
+            </p>
           </div>
 
-          {/* Card 2: Weekly Completion Rate */}
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                Weekly Completion Rate
-              </p>
-              <p className="text-2xl sm:text-3xl font-extrabold text-[#39d353] mt-1">
-                {bannerMetrics.weeklyRate}%
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1">
-                {calendar.summary.activeDays} active{" "}
-                {calendar.summary.activeDays === 1 ? "day" : "days"} this month
-              </p>
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                Step 2 • Window Hub
+              </span>
+              <span className="text-lg">🗂️</span>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-[#0e4429]/60 border border-[#26a641]/40 flex items-center justify-center text-xl">
-              📈
-            </div>
+            <h3 className="text-base font-bold text-white">
+              Notion-Style Workspace Gallery
+            </h3>
+            <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+              Open your customizable <strong className="text-gray-200">My Dashboard</strong> window
+              with cards for Routine &amp; Habit Tracker, Finances, Exercise, and{" "}
+              <code className="text-gray-300">+ New page</code>.
+            </p>
           </div>
 
-          {/* Card 3: Best Day of the Week */}
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wider text-gray-400">
-                Best Day of the Week
-              </p>
-              <p className="text-2xl sm:text-3xl font-extrabold text-white mt-1">
-                {bannerMetrics.bestDay}
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1">
-                Highest routine completion consistency
-              </p>
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#39d353]">
+                Step 3 • Inside Window
+              </span>
+              <span className="text-lg">🟩</span>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-[#21262d] border border-[#30363d] flex items-center justify-center text-xl">
-              🏆
-            </div>
+            <h3 className="text-base font-bold text-white">
+              GitHub Routine Heatmap
+            </h3>
+            <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+              Click into your Routine &amp; Habit Tracker card to check off daily
+              habits and watch each calendar date square shift from dark green
+              to neon green.
+            </p>
           </div>
-        </section>
-
-        {/* 2. Split View Grid: Left Heatmap Calendar | Right Daily Checklist */}
-        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          <div className="lg:col-span-7">
-            <HeatmapCalendar
-              calendar={calendar}
-              selectedDate={selectedDate}
-              onSelectDate={(date) => setSelectedDate(date)}
-              onPrevMonth={handlePrevMonth}
-              onNextMonth={handleNextMonth}
-              onGoToToday={handleGoToToday}
-            />
-          </div>
-
-          <div className="lg:col-span-5">
-            <DailyChecklist
-              log={dailyLog}
-              loading={loadingLog}
-              onToggleItem={handleToggleItem}
-              onSetAllItems={handleSetAllItems}
-              onAddCustomItem={handleAddCustomItem}
-              onRemoveItem={handleRemoveItem}
-            />
-          </div>
-        </section>
+        </div>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-[#30363d] py-6 text-center text-xs text-gray-500">
+        Personal Tracker • Home → Login → Workspace Window Hub → Routine
+        Heatmap
+      </footer>
     </div>
   );
 }

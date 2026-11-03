@@ -1,4 +1,4 @@
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, type Model, type Types } from "mongoose";
 import type {
   DayOfWeek,
   DayRoutineTemplate,
@@ -6,7 +6,10 @@ import type {
   TemplateChecklistItem,
 } from "../config/defaultSchedule";
 
-export type IRoutineTemplate = DayRoutineTemplate;
+export interface IRoutineTemplate extends DayRoutineTemplate {
+  _id?: Types.ObjectId | string;
+  userId: Types.ObjectId | string;
+}
 
 const TemplateItemSchema = new Schema<TemplateChecklistItem>(
   {
@@ -32,10 +35,15 @@ const TemplateItemSchema = new Schema<TemplateChecklistItem>(
 
 const RoutineTemplateSchema = new Schema<IRoutineTemplate>(
   {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     dayOfWeek: {
       type: String,
       required: true,
-      unique: true,
       enum: [
         "sunday",
         "monday",
@@ -52,6 +60,9 @@ const RoutineTemplateSchema = new Schema<IRoutineTemplate>(
   },
   { timestamps: true }
 );
+
+// Compound unique index scoped per user and dayOfWeek
+RoutineTemplateSchema.index({ userId: 1, dayOfWeek: 1 }, { unique: true });
 
 export const RoutineTemplateModel: Model<IRoutineTemplate> =
   (mongoose.models.RoutineTemplate as Model<IRoutineTemplate>) ||

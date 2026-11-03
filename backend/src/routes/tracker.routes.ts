@@ -12,8 +12,12 @@ import {
   handleToggleChecklistItem,
   handleUpdateRoutineByDay,
 } from "../controllers/tracker.controller";
+import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();
+
+// Protect all tracker routes with JWT Authentication
+router.use(requireAuth);
 
 // Weekly routine template endpoints (Monday - Sunday)
 router.get("/routines", handleGetWeeklyRoutines);
@@ -33,4 +37,3 @@ router.get("/calendar", handleGetMonthlyCalendar);
 router.get("/stats", handleGetStats);
 
 export default router;
-

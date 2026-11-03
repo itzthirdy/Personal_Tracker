@@ -9,22 +9,40 @@ import {
   type HabitCategory,
   type TemplateChecklistItem,
 } from "../config/defaultSchedule";
-import { DailyLogModel, type IDailyChecklistItem, type IDailyLog } from "../models/DailyLog";
+import {
+  DailyLogModel,
+  type IDailyChecklistItem,
+  type IDailyLog,
+} from "../models/DailyLog";
 import { RoutineTemplateModel } from "../models/RoutineTemplate";
 
-// In-memory fallback store when MongoDB is not yet configured/running
-const memoryTemplates = new Map<DayOfWeek, DayRoutineTemplate>();
-const memoryDailyLogs = new Map<string, IDailyLog>();
+// Multi-tenant in-memory fallback stores keyed by userId
+const memoryTemplatesByUser = new Map<string, Map<DayOfWeek, DayRoutineTemplate>>();
+const memoryDailyLogsByUser = new Map<string, Map<string, IDailyLog>>();
 
-function initMemoryTemplates(forceReset = false) {
-  if (memoryTemplates.size > 0 && !forceReset) return;
-  memoryTemplates.clear();
-  for (const tpl of DEFAULT_WEEKLY_SCHEDULE) {
-    memoryTemplates.set(tpl.dayOfWeek, structuredClone(tpl));
+function getUserMemoryTemplates(
+  userId: string,
+  forceReset = false
+): Map<DayOfWeek, DayRoutineTemplate> {
+  let userMap = memoryTemplatesByUser.get(userId);
+  if (!userMap || forceReset || userMap.size === 0) {
+    userMap = new Map<DayOfWeek, DayRoutineTemplate>();
+    for (const tpl of DEFAULT_WEEKLY_SCHEDULE) {
+      userMap.set(tpl.dayOfWeek, structuredClone(tpl));
+    }
+    memoryTemplatesByUser.set(userId, userMap);
   }
+  return userMap;
 }
 
-initMemoryTemplates();
+function getUserMemoryLogs(userId: string): Map<string, IDailyLog> {
+  let userLogs = memoryDailyLogsByUser.get(userId);
+  if (!userLogs) {
+    userLogs = new Map<string, IDailyLog>();
+    memoryDailyLogsByUser.set(userId, userLogs);
+  }
+  return userLogs;
+}
 
 export function parseDateToDayOfWeek(dateStr: string): DayOfWeek {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
@@ -69,18 +87,26 @@ function recomputeLogMetrics(log: IDailyLog): IDailyLog {
   return log;
 }
 
-export async function seedDefaultRoutines(forceReset = false): Promise<DayRoutineTemplate[]> {
-  initMemoryTemplates(forceReset);
+export async function seedDefaultRoutines(
+  userId: string,
+  forceReset = false
+): Promise<DayRoutineTemplate[]> {
+  const userTemplates = getUserMemoryTemplates(userId, forceReset);
 
   if (isDatabaseConnected()) {
     if (forceReset) {
-      await RoutineTemplateModel.deleteMany({});
+      await RoutineTemplateModel.deleteMany({ userId });
     }
-    const existingCount = await RoutineTemplateModel.countDocuments();
+    const existingCount = await RoutineTemplateModel.countDocuments({ userId });
     if (existingCount === 0) {
-      await RoutineTemplateModel.insertMany(DEFAULT_WEEKLY_SCHEDULE);
+      await RoutineTemplateModel.insertMany(
+        DEFAULT_WEEKLY_SCHEDULE.map((tpl) => ({
+          ...tpl,
+          userId,
+        }))
+      );
     }
-    const docs = await RoutineTemplateModel.find().lean();
+    const docs = await RoutineTemplateModel.find({ userId }).lean();
     return docs.map((d) => ({
       dayOfWeek: d.dayOfWeek,
       dayIndex: d.dayIndex,
@@ -89,16 +115,17 @@ export async function seedDefaultRoutines(forceReset = false): Promise<DayRoutin
     }));
   }
 
-  return Array.from(memoryTemplates.values());
+  return Array.from(userTemplates.values());
 }
 
-export async function getWeeklyTemplates(): Promise<DayRoutineTemplate[]> {
+export async function getWeeklyTemplates(
+  userId: string
+): Promise<DayRoutineTemplate[]> {
   if (isDatabaseConnected()) {
-    const docs = await RoutineTemplateModel.find().lean();
+    const docs = await RoutineTemplateModel.find({ userId }).lean();
     if (docs.length === 0) {
-      return seedDefaultRoutines(false);
+      return seedDefaultRoutines(userId, false);
     }
-    // Sort Monday (1) -> Saturday (6), then Sunday (0)
     return docs
       .map((d) => ({
         dayOfWeek: d.dayOfWeek,
@@ -113,19 +140,23 @@ export async function getWeeklyTemplates(): Promise<DayRoutineTemplate[]> {
       });
   }
 
-  return Array.from(memoryTemplates.values()).sort((a, b) => {
+  const userTemplates = getUserMemoryTemplates(userId, false);
+  return Array.from(userTemplates.values()).sort((a, b) => {
     const orderA = a.dayIndex === 0 ? 7 : a.dayIndex;
     const orderB = b.dayIndex === 0 ? 7 : b.dayIndex;
     return orderA - orderB;
   });
 }
 
-export async function getTemplateByDay(dayOfWeek: DayOfWeek): Promise<DayRoutineTemplate> {
+export async function getTemplateByDay(
+  userId: string,
+  dayOfWeek: DayOfWeek
+): Promise<DayRoutineTemplate> {
   if (isDatabaseConnected()) {
-    let doc = await RoutineTemplateModel.findOne({ dayOfWeek }).lean();
+    let doc = await RoutineTemplateModel.findOne({ userId, dayOfWeek }).lean();
     if (!doc) {
-      await seedDefaultRoutines(false);
-      doc = await RoutineTemplateModel.findOne({ dayOfWeek }).lean();
+      await seedDefaultRoutines(userId, false);
+      doc = await RoutineTemplateModel.findOne({ userId, dayOfWeek }).lean();
     }
     if (doc) {
       return {
@@ -137,7 +168,8 @@ export async function getTemplateByDay(dayOfWeek: DayOfWeek): Promise<DayRoutine
     }
   }
 
-  const tpl = memoryTemplates.get(dayOfWeek);
+  const userTemplates = getUserMemoryTemplates(userId, false);
+  const tpl = userTemplates.get(dayOfWeek);
   if (!tpl) {
     throw new Error(`Routine template not found for day: ${dayOfWeek}`);
   }
@@ -145,6 +177,7 @@ export async function getTemplateByDay(dayOfWeek: DayOfWeek): Promise<DayRoutine
 }
 
 export async function updateTemplateForDay(
+  userId: string,
   dayOfWeek: DayOfWeek,
   items: Omit<TemplateChecklistItem, "id" | "order">[]
 ): Promise<DayRoutineTemplate> {
@@ -157,10 +190,17 @@ export async function updateTemplateForDay(
   }));
 
   if (isDatabaseConnected()) {
-    const existing = await getTemplateByDay(dayOfWeek);
+    const existing = await getTemplateByDay(userId, dayOfWeek);
     const updated = await RoutineTemplateModel.findOneAndUpdate(
-      { dayOfWeek },
-      { $set: { items: formattedItems, dayIndex: existing.dayIndex, label: existing.label } },
+      { userId, dayOfWeek },
+      {
+        $set: {
+          userId,
+          items: formattedItems,
+          dayIndex: existing.dayIndex,
+          label: existing.label,
+        },
+      },
       { new: true, upsert: true }
     ).lean();
 
@@ -174,22 +214,27 @@ export async function updateTemplateForDay(
     }
   }
 
-  const current = await getTemplateByDay(dayOfWeek);
+  const userTemplates = getUserMemoryTemplates(userId, false);
+  const current = await getTemplateByDay(userId, dayOfWeek);
   const updatedTpl: DayRoutineTemplate = {
     ...current,
     items: formattedItems,
   };
-  memoryTemplates.set(dayOfWeek, updatedTpl);
+  userTemplates.set(dayOfWeek, updatedTpl);
   return structuredClone(updatedTpl);
 }
 
-export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
+export async function getOrCreateDailyLog(
+  userId: string,
+  date: string
+): Promise<IDailyLog> {
   const dayOfWeek = parseDateToDayOfWeek(date);
 
   if (isDatabaseConnected()) {
-    const existing = await DailyLogModel.findOne({ date }).lean();
+    const existing = await DailyLogModel.findOne({ userId, date }).lean();
     if (existing) {
       return {
+        userId: String(existing.userId),
         date: existing.date,
         dayOfWeek: existing.dayOfWeek,
         items: existing.items,
@@ -203,7 +248,7 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
       };
     }
 
-    const template = await getTemplateByDay(dayOfWeek);
+    const template = await getTemplateByDay(userId, dayOfWeek);
     const initialItems: IDailyChecklistItem[] = template.items.map((item) => ({
       id: item.id,
       title: item.title,
@@ -214,6 +259,7 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
     }));
 
     const newLog = recomputeLogMetrics({
+      userId,
       date,
       dayOfWeek,
       items: initialItems,
@@ -228,6 +274,7 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
 
     const created = await DailyLogModel.create(newLog);
     return {
+      userId: String(created.userId),
       date: created.date,
       dayOfWeek: created.dayOfWeek,
       items: created.items,
@@ -241,12 +288,13 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
     };
   }
 
-  const memLog = memoryDailyLogs.get(date);
+  const userLogs = getUserMemoryLogs(userId);
+  const memLog = userLogs.get(date);
   if (memLog) {
     return structuredClone(memLog);
   }
 
-  const template = await getTemplateByDay(dayOfWeek);
+  const template = await getTemplateByDay(userId, dayOfWeek);
   const initialItems: IDailyChecklistItem[] = template.items.map((item) => ({
     id: item.id,
     title: item.title,
@@ -257,6 +305,7 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
   }));
 
   const newLog = recomputeLogMetrics({
+    userId,
     date,
     dayOfWeek,
     items: initialItems,
@@ -269,32 +318,34 @@ export async function getOrCreateDailyLog(date: string): Promise<IDailyLog> {
     notes: "",
   });
 
-  memoryDailyLogs.set(date, newLog);
+  userLogs.set(date, newLog);
   return structuredClone(newLog);
 }
 
-async function saveDailyLog(log: IDailyLog): Promise<IDailyLog> {
-  const updated = recomputeLogMetrics(log);
+async function saveDailyLog(userId: string, log: IDailyLog): Promise<IDailyLog> {
+  const updated = recomputeLogMetrics({ ...log, userId });
 
   if (isDatabaseConnected()) {
     await DailyLogModel.findOneAndUpdate(
-      { date: updated.date },
+      { userId, date: updated.date },
       { $set: updated },
       { new: true, upsert: true }
     );
   } else {
-    memoryDailyLogs.set(updated.date, structuredClone(updated));
+    const userLogs = getUserMemoryLogs(userId);
+    userLogs.set(updated.date, structuredClone(updated));
   }
 
   return structuredClone(updated);
 }
 
 export async function toggleChecklistItem(
+  userId: string,
   date: string,
   itemId: string,
   completed?: boolean
 ): Promise<IDailyLog> {
-  const log = await getOrCreateDailyLog(date);
+  const log = await getOrCreateDailyLog(userId, date);
   const item = log.items.find((i) => i.id === itemId);
 
   if (!item) {
@@ -305,14 +356,15 @@ export async function toggleChecklistItem(
   item.completed = nextCompleted;
   item.completedAt = nextCompleted ? new Date().toISOString() : null;
 
-  return saveDailyLog(log);
+  return saveDailyLog(userId, log);
 }
 
 export async function setAllChecklistItems(
+  userId: string,
   date: string,
   completed: boolean
 ): Promise<IDailyLog> {
-  const log = await getOrCreateDailyLog(date);
+  const log = await getOrCreateDailyLog(userId, date);
   const now = completed ? new Date().toISOString() : null;
 
   for (const item of log.items) {
@@ -320,20 +372,21 @@ export async function setAllChecklistItems(
     item.completedAt = now;
   }
 
-  return saveDailyLog(log);
+  return saveDailyLog(userId, log);
 }
 
 export async function addCustomChecklistItem(
+  userId: string,
   date: string,
   title: string,
   category: HabitCategory = "custom"
 ): Promise<IDailyLog> {
-  const log = await getOrCreateDailyLog(date);
+  const log = await getOrCreateDailyLog(userId, date);
   const nextOrder =
     log.items.reduce((maxOrder, i) => Math.max(maxOrder, i.order), 0) + 1;
 
   const newItem: IDailyChecklistItem = {
-    id: `custom-${Date.now()}`,
+    id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     title: title.trim(),
     category,
     completed: false,
@@ -342,14 +395,15 @@ export async function addCustomChecklistItem(
   };
 
   log.items.push(newItem);
-  return saveDailyLog(log);
+  return saveDailyLog(userId, log);
 }
 
 export async function removeChecklistItem(
+  userId: string,
   date: string,
   itemId: string
 ): Promise<IDailyLog> {
-  const log = await getOrCreateDailyLog(date);
+  const log = await getOrCreateDailyLog(userId, date);
   const prevLen = log.items.length;
   log.items = log.items.filter((i) => i.id !== itemId);
 
@@ -357,7 +411,7 @@ export async function removeChecklistItem(
     throw new Error(`Checklist item "${itemId}" not found on ${date}.`);
   }
 
-  return saveDailyLog(log);
+  return saveDailyLog(userId, log);
 }
 
 export interface CalendarDaySummary {
@@ -378,7 +432,7 @@ export interface MonthlyCalendarResponse {
   month: number;
   monthName: string;
   daysInMonth: number;
-  firstDayIndex: number; // 0 = Sunday .. 6 = Saturday (for calendar grid alignment)
+  firstDayIndex: number;
   palette: typeof GITHUB_GREEN_SHADES;
   summary: {
     perfectDays: number;
@@ -389,6 +443,7 @@ export interface MonthlyCalendarResponse {
 }
 
 export async function getMonthlyCalendar(
+  userId: string,
   year: number,
   month: number
 ): Promise<MonthlyCalendarResponse> {
@@ -398,30 +453,35 @@ export async function getMonthlyCalendar(
 
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
   const firstDayIndex = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", {
-    month: "long",
-    timeZone: "UTC",
-  });
+  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString(
+    "en-US",
+    {
+      month: "long",
+      timeZone: "UTC",
+    }
+  );
 
   const prefix = `${year}-${String(month).padStart(2, "0")}-`;
   const loggedMap = new Map<string, IDailyLog>();
 
   if (isDatabaseConnected()) {
     const logs = await DailyLogModel.find({
+      userId,
       date: { $regex: `^${prefix}` },
     }).lean();
     for (const l of logs) {
       loggedMap.set(l.date, l);
     }
   } else {
-    for (const [dateKey, l] of memoryDailyLogs.entries()) {
+    const userLogs = getUserMemoryLogs(userId);
+    for (const [dateKey, l] of userLogs.entries()) {
       if (dateKey.startsWith(prefix)) {
         loggedMap.set(dateKey, l);
       }
     }
   }
 
-  const templates = await getWeeklyTemplates();
+  const templates = await getWeeklyTemplates(userId);
   const templateByDay = new Map<DayOfWeek, DayRoutineTemplate>();
   for (const t of templates) {
     templateByDay.set(t.dayOfWeek, t);
@@ -500,13 +560,14 @@ export async function getMonthlyCalendar(
   };
 }
 
-export async function getConsistencyStats() {
+export async function getConsistencyStats(userId: string) {
   let allLogs: IDailyLog[] = [];
 
   if (isDatabaseConnected()) {
-    allLogs = await DailyLogModel.find().sort({ date: 1 }).lean();
+    allLogs = await DailyLogModel.find({ userId }).sort({ date: 1 }).lean();
   } else {
-    allLogs = Array.from(memoryDailyLogs.values()).sort((a, b) =>
+    const userLogs = getUserMemoryLogs(userId);
+    allLogs = Array.from(userLogs.values()).sort((a, b) =>
       a.date.localeCompare(b.date)
     );
   }
@@ -517,14 +578,16 @@ export async function getConsistencyStats() {
   ).length;
   const activeDays = allLogs.filter((l) => l.completedCount > 0).length;
 
-  const totalTasksCompleted = allLogs.reduce((sum, l) => sum + l.completedCount, 0);
+  const totalTasksCompleted = allLogs.reduce(
+    (sum, l) => sum + l.completedCount,
+    0
+  );
   const totalTasksAssigned = allLogs.reduce((sum, l) => sum + l.totalCount, 0);
   const overallCompletionPercentage =
     totalTasksAssigned > 0
       ? Math.round((totalTasksCompleted / totalTasksAssigned) * 100)
       : 0;
 
-  // Calculate current streak of active days (days with >= 1 completed habit)
   const activeDatesDesc = allLogs
     .filter((l) => l.completedCount > 0)
     .map((l) => l.date)
@@ -545,14 +608,15 @@ export async function getConsistencyStats() {
     }
   }
 
-  // Calculate weekly completion rate across the last 7 tracked logs (or all if < 7)
   const recentLogs = allLogs.slice(-7);
-  const recentCompleted = recentLogs.reduce((sum, l) => sum + l.completedCount, 0);
+  const recentCompleted = recentLogs.reduce(
+    (sum, l) => sum + l.completedCount,
+    0
+  );
   const recentTotal = recentLogs.reduce((sum, l) => sum + l.totalCount, 0);
   const weeklyCompletionRate =
     recentTotal > 0 ? Math.round((recentCompleted / recentTotal) * 100) : 0;
 
-  // Calculate best day of the week by average completion percentage
   const dayStats = new Map<DayOfWeek, { totalPct: number; count: number }>();
   for (const log of allLogs) {
     if (log.completedCount > 0) {
@@ -587,4 +651,3 @@ export async function getConsistencyStats() {
     palette: GITHUB_GREEN_SHADES,
   };
 }
-

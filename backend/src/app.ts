@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import { isDatabaseConnected } from "./config/database";
+import authRoutes from "./routes/auth.routes";
+import hubRoutes from "./routes/hub.routes";
 import trackerRoutes from "./routes/tracker.routes";
 
 const app = express();
@@ -21,7 +23,15 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.use("/api", trackerRoutes);
+// Authentication & User Management routes
+app.use("/api/auth", authRoutes);
+
+// Customizable Workspace Hub Cards routes
+app.use("/api/hub", hubRoutes);
+
+// Multi-Tenant Habit & Routine Tracker routes
 app.use("/api/tracker", trackerRoutes);
+app.use("/api/habits", trackerRoutes);
+app.use("/api", trackerRoutes);
 
 export default app;

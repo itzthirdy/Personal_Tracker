@@ -1,4 +1,4 @@
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, type Model, type Types } from "mongoose";
 import type { DayOfWeek, HabitCategory } from "../config/defaultSchedule";
 
 export interface IDailyChecklistItem {
@@ -11,6 +11,8 @@ export interface IDailyChecklistItem {
 }
 
 export interface IDailyLog {
+  _id?: Types.ObjectId | string;
+  userId?: Types.ObjectId | string;
   date: string; // YYYY-MM-DD
   dayOfWeek: DayOfWeek;
   items: IDailyChecklistItem[];
@@ -49,12 +51,16 @@ const DailyChecklistItemSchema = new Schema<IDailyChecklistItem>(
 
 const DailyLogSchema = new Schema<IDailyLog>(
   {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
     date: {
       type: String,
       required: true,
-      unique: true,
       match: /^\d{4}-\d{2}-\d{2}$/,
-      index: true,
     },
     dayOfWeek: {
       type: String,
@@ -80,6 +86,9 @@ const DailyLogSchema = new Schema<IDailyLog>(
   },
   { timestamps: true }
 );
+
+// Compound unique index scoped per user and date
+DailyLogSchema.index({ userId: 1, date: 1 }, { unique: true });
 
 export const DailyLogModel: Model<IDailyLog> =
   (mongoose.models.DailyLog as Model<IDailyLog>) ||

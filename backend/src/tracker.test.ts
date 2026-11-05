@@ -3,7 +3,8 @@ import { Duplex } from "node:stream";
 import { IncomingMessage, ServerResponse } from "node:http";
 import app from "./app";
 
-// Force the deterministic heuristic coach in tests (no network calls).
+// Force deterministic in-memory storage & heuristic coach in unit tests (no external network calls).
+delete process.env.MONGODB_URI;
 delete process.env.GEMINI_API_KEY;
 
 interface TestRequestOptions {

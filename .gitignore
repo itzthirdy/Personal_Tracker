@@ -1,7 +1,18 @@
 node_modules/
-.env
-.env.local
-.DS_Store
 dist/
 .next/
+.vercel/
+.DS_Store
+
+# Environment variables & credentials (never commit secrets)
+.env
+.env.*
+*.env
 atlas-credentials.env
+!.env.example
+!**/.env.example
+backend/.env.example
+frontend/.env.example
+
+!.env.example
+!**/.env.example

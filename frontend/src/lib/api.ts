@@ -16,9 +16,9 @@ import {
   type WorkspaceModuleKey,
 } from "@/types/tracker";
 
-const API_ROOT =
-  process.env.NEXT_PUBLIC_API_ROOT ?? "http://localhost:8000/api";
-const TRACKER_API = `${API_ROOT}/tracker`;
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+const TRACKER_API = `${API_BASE_URL}/tracker`;
 
 const TOKEN_STORAGE_KEY = "personal_tracker_jwt";
 const USER_STORAGE_KEY = "personal_tracker_user";
@@ -68,7 +68,7 @@ export async function apiRegister(
   email: string,
   password: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${API_ROOT}/auth/register`, {
+  const res = await fetch(`${API_BASE_URL}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, email, password }),
@@ -86,7 +86,7 @@ export async function apiLogin(
   identifier: string,
   password: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${API_ROOT}/auth/login`, {
+  const res = await fetch(`${API_BASE_URL}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ identifier, password }),
@@ -101,7 +101,7 @@ export async function apiLogin(
 }
 
 export async function apiGetMe(): Promise<AuthUser> {
-  const res = await fetch(`${API_ROOT}/auth/me`, {
+  const res = await fetch(`${API_BASE_URL}/auth/me`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
@@ -169,7 +169,7 @@ export function getFallbackWorkspaceCards(): WorkspaceCard[] {
 }
 
 export async function fetchWorkspaceHub(): Promise<WorkspaceCard[]> {
-  const res = await fetch(`${API_ROOT}/hub`, {
+  const res = await fetch(`${API_BASE_URL}/hub`, {
     headers: getAuthHeaders(),
     cache: "no-store",
   });
@@ -188,7 +188,7 @@ export async function apiCreateWorkspaceCard(input: {
   moduleKey?: WorkspaceModuleKey;
   status?: WorkspaceCardStatus;
 }): Promise<WorkspaceCard> {
-  const res = await fetch(`${API_ROOT}/hub/cards`, {
+  const res = await fetch(`${API_BASE_URL}/hub/cards`, {
     method: "POST",
     headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(input),
@@ -210,7 +210,7 @@ export async function apiUpdateWorkspaceCard(
     status: WorkspaceCardStatus;
   }>
 ): Promise<WorkspaceCard> {
-  const res = await fetch(`${API_ROOT}/hub/cards/${cardId}`, {
+  const res = await fetch(`${API_BASE_URL}/hub/cards/${cardId}`, {
     method: "PATCH",
     headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(updates),
@@ -223,7 +223,7 @@ export async function apiUpdateWorkspaceCard(
 }
 
 export async function apiDeleteWorkspaceCard(cardId: string): Promise<void> {
-  const res = await fetch(`${API_ROOT}/hub/cards/${cardId}`, {
+  const res = await fetch(`${API_BASE_URL}/hub/cards/${cardId}`, {
     method: "DELETE",
     headers: getAuthHeaders(),
   });

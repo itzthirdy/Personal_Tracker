@@ -1,20 +1,49 @@
 import express from "express";
 import cors from "cors";
-import { isDatabaseConnected } from "./config/database";
+import { connectDatabase, isDatabaseConnected } from "./config/database";
 import authRoutes from "./routes/auth.routes";
 import hubRoutes from "./routes/hub.routes";
 import trackerRoutes from "./routes/tracker.routes";
 
 const app = express();
 
+const allowedOrigins = process.env.FRONTEND_ORIGIN
+  ? process.env.FRONTEND_ORIGIN.split(",")
+      .map((o) => o.trim())
+      .filter(Boolean)
+  : ["http://localhost:3000"];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
+    origin: (origin, callback) => {
+      // Allow server-to-server, curl, or same-origin requests with no Origin header
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (
+        allowedOrigins.includes("*") ||
+        allowedOrigins.includes(origin) ||
+        /^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/.test(origin)
+      ) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
   })
 );
 
 app.use(express.json());
+
+// Serverless DB readiness middleware: ensures Mongoose connects on cold starts before handling routes
+app.use(async (_req, _res, next) => {
+  if (!isDatabaseConnected() && process.env.MONGODB_URI) {
+    await connectDatabase();
+  }
+  next();
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({

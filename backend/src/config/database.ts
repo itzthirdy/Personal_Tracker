@@ -86,6 +86,7 @@ export async function connectDatabase(): Promise<boolean> {
     if (!cached.promise) {
       cached.promise = mongoose
         .connect(uri, {
+          dbName: "personal_tracker",
           serverSelectionTimeoutMS: 10000,
           bufferCommands: false,
         })

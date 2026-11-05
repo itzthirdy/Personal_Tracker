@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "bun --watch src/server.ts",
-    "start": "bun src/server.ts",
+    "build": "tsc --noEmit false --outDir dist",
+    "start": "node dist/src/server.js",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

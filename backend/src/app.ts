@@ -45,6 +45,14 @@ app.use(async (_req, _res, next) => {
   next();
 });
 
+app.get("/", (_req, res) => {
+  res.json({
+    service: "Personal Tracker API",
+    status: "ok",
+    database: isDatabaseConnected() ? "mongodb" : "in-memory-fallback",
+  });
+});
+
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",

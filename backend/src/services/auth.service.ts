@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import mongoose from "mongoose";
 import { isDatabaseConnected } from "../config/database";
 import { signJwtToken } from "../middleware/auth.middleware";
@@ -6,6 +7,35 @@ import { seedDefaultWorkspaceCards } from "./hub.service";
 
 // In-memory fallback store for users when MongoDB is not connected
 const memoryUsersById = new Map<string, IUser>();
+
+// Portable password hashing using Node/Bun built-in node:crypto (works identically on Vercel Node.js and Bun)
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const derivedKey = scryptSync(password, salt, 64).toString("hex");
+  return `scrypt$${salt}$${derivedKey}`;
+}
+
+async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  if (storedHash.startsWith("scrypt$")) {
+    const parts = storedHash.split("$");
+    const salt = parts[1];
+    const keyHex = parts[2];
+    if (!salt || !keyHex) return false;
+    const keyBuffer = Buffer.from(keyHex, "hex");
+    const derivedBuffer = scryptSync(password, salt, 64);
+    if (keyBuffer.length !== derivedBuffer.length) return false;
+    return timingSafeEqual(keyBuffer, derivedBuffer);
+  }
+
+  // Fallback for legacy $argon2 / $2b hashes created under Bun locally
+  const g = globalThis as unknown as {
+    Bun?: { password?: { verify: (pw: string, hash: string) => Promise<boolean> } };
+  };
+  if (g.Bun?.password?.verify) {
+    return g.Bun.password.verify(password, storedHash);
+  }
+  return false;
+}
 
 function toPublicProfile(user: IUser): PublicUserProfile {
   return {
@@ -42,7 +72,7 @@ export async function registerUser(
     throw new Error("Password must be at least 6 characters long.");
   }
 
-  const passwordHash = await Bun.password.hash(password);
+  const passwordHash = hashPassword(password);
 
   let createdUser: IUser;
 
@@ -138,7 +168,7 @@ export async function loginUser(input: LoginUserInput): Promise<AuthResult> {
     throw new Error("Invalid credentials.");
   }
 
-  const isValid = await Bun.password.verify(password, foundUser.passwordHash);
+  const isValid = await verifyPassword(password, foundUser.passwordHash);
   if (!isValid) {
     throw new Error("Invalid credentials.");
   }

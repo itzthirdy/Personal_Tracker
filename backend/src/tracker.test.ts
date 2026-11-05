@@ -612,11 +612,8 @@ describe("Weekly insights engine", () => {
     globalThis.fetch = (async (input: string | URL | Request) => {
       const url = String(input);
       calledUrls.push(url);
-      if (url.includes("gemini-2.5-flash:")) {
+      if (url.includes("gemini-3.5-flash-lite:")) {
         return new Response("High Demand", { status: 503 });
-      }
-      if (url.includes("gemini-2.5-flash-lite:")) {
-        throw new DOMException("The operation timed out.", "TimeoutError");
       }
       return new Response(
         JSON.stringify({
@@ -642,9 +639,9 @@ describe("Weekly insights engine", () => {
       expect(first.status).toBe(200);
       expect(first.body.source).toBe("gemini-ai");
       expect(first.body.insightText).toBe("Great consistency on Morning Run!");
-      // Tried gemini-2.5-flash (503), gemini-2.5-flash-lite (timeout), succeeded on gemini-3.8-flash
-      expect(calledUrls.length).toBe(3);
-      expect(calledUrls[2]).toContain("gemini-3.8-flash:generateContent");
+      // Tried gemini-3.5-flash-lite (503), succeeded on gemini-3.8-flash
+      expect(calledUrls.length).toBe(2);
+      expect(calledUrls[1]).toContain("gemini-3.8-flash:generateContent");
 
       // Second call with identical metrics hits server-side cache (0 external fetch calls)
       const second = await requestApp<any>(
@@ -653,7 +650,7 @@ describe("Weekly insights engine", () => {
       );
       expect(second.status).toBe(200);
       expect(second.body.source).toBe("gemini-ai");
-      expect(calledUrls.length).toBe(3);
+      expect(calledUrls.length).toBe(2);
 
       // Explicit forceRefresh=true bypasses cache and calls Gemini cascade again
       const forced = await requestApp<any>(
@@ -662,7 +659,7 @@ describe("Weekly insights engine", () => {
       );
       expect(forced.status).toBe(200);
       expect(forced.body.source).toBe("gemini-ai");
-      expect(calledUrls.length).toBe(6);
+      expect(calledUrls.length).toBe(4);
     } finally {
       globalThis.fetch = originalFetch;
       delete process.env.GEMINI_API_KEY;

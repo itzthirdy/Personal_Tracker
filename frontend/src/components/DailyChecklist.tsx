@@ -111,46 +111,47 @@ export default function DailyChecklist({
   return (
     <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 shadow-xl flex flex-col justify-between">
       <div>
-        {/* Header */}
-        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-block px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider rounded bg-[#801E0F] text-white">
-                {log.date}
+        {/* 1. Date Header (Fixed Top Row) */}
+        <div className="w-full mb-3">
+          <div className="flex items-center gap-2 min-h-[22px]">
+            <span className="inline-block px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider rounded bg-[#801E0F] text-white shrink-0">
+              {log.date}
+            </span>
+            {allChecked && (
+              <span className="inline-block px-2 py-0.5 text-[11px] font-bold rounded bg-[#39d353]/20 text-[#39d353] border border-[#39d353]/40 shrink-0">
+                100% Complete ✨
               </span>
-              {allChecked && (
-                <span className="inline-block px-2 py-0.5 text-[11px] font-bold rounded bg-[#39d353]/20 text-[#39d353] border border-[#39d353]/40">
-                  100% Complete ✨
-                </span>
-              )}
-            </div>
-            <h2 className="text-xl font-bold text-white mt-1.5">
-              {formatFullDateHeading(log.date)}
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onOpenManager}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#801E0F] bg-[#801E0F]/20 text-red-200 hover:bg-[#801E0F] hover:text-white transition-colors cursor-pointer"
-            >
-              ⚙ Manage Routines
-            </button>
-            {log.totalCount > 0 && (
-              <button
-                type="button"
-                onClick={() => onSetAllItems(!allChecked)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
-                  allChecked
-                    ? "bg-[#21262d] text-gray-300 border-[#30363d] hover:text-white hover:bg-[#30363d]"
-                    : "bg-[#0e4429] text-[#39d353] border-[#26a641]/50 hover:bg-[#006d32] hover:text-white"
-                }`}
-              >
-                {allChecked ? "Uncheck All" : "Check All"}
-              </button>
             )}
           </div>
+          <h2 className="text-xl font-bold text-white mt-1.5 truncate">
+            {formatFullDateHeading(log.date)}
+          </h2>
+        </div>
+
+        {/* 2. Dedicated Action Toolbar Row (Always directly below Date Header & above Progress Card) */}
+        <div className="flex items-center justify-between gap-3 w-full mb-4">
+          <button
+            type="button"
+            onClick={onOpenManager}
+            className="flex-shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-semibold border border-[#801E0F] bg-[#801E0F]/20 text-red-200 hover:bg-[#801E0F] hover:text-white transition-colors cursor-pointer"
+          >
+            ⚙ Manage Routines
+          </button>
+
+          <button
+            type="button"
+            disabled={log.totalCount === 0}
+            onClick={() => onSetAllItems(!allChecked)}
+            className={`flex-shrink-0 min-w-[104px] text-center px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+              log.totalCount === 0
+                ? "bg-[#21262d]/50 text-gray-500 border-[#30363d] opacity-50 pointer-events-none"
+                : allChecked
+                  ? "bg-[#21262d] text-gray-300 border-[#30363d] hover:text-white hover:bg-[#30363d] cursor-pointer"
+                  : "bg-[#0e4429] text-[#39d353] border-[#26a641]/50 hover:bg-[#006d32] hover:text-white cursor-pointer"
+            }`}
+          >
+            {allChecked ? "Uncheck All" : "Check All"}
+          </button>
         </div>
 
         {/* Progress */}

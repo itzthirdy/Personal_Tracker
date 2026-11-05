@@ -110,12 +110,7 @@ function heuristicSummary(
 // Gemini coach (Multi-Model Cascade & 15s Timeout Resilience)
 // ------------------------------------------------------------
 
-const GEMINI_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
-  "gemini-3.8-flash",
-  "gemini-flash-latest",
-] as const;
+const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
 
 const GEMINI_TIMEOUT_MS = 15_000;
 
@@ -124,17 +119,6 @@ function readGeminiApiKey(): string | undefined {
   if (!raw) return undefined;
   const cleaned = raw.trim().replace(/^["']|["']$/g, "").trim();
   return cleaned.length > 0 ? cleaned : undefined;
-}
-
-function buildModelEndpoint(model: string, apiKey: string): string {
-  if (apiKey.startsWith("AQ.")) {
-    return `https://aiplatform.googleapis.com/v1/publishers/google/models/${model}:generateContent?key=${encodeURIComponent(
-      apiKey
-    )}`;
-  }
-  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-    apiKey
-  )}`;
 }
 
 async function generateGeminiSummary(
@@ -157,11 +141,12 @@ async function generateGeminiSummary(
 
   for (const model of GEMINI_MODELS) {
     try {
-      const endpoint = buildModelEndpoint(model, apiKey);
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
       const res = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-goog-api-key": apiKey.trim(),
         },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],

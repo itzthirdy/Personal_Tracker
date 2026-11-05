@@ -16,6 +16,9 @@ async function migrateLegacyIndexes(): Promise<void> {
   const legacy: Array<{ collection: string; index: string }> = [
     { collection: "routinetemplates", index: "dayOfWeek_1" },
     { collection: "dailylogs", index: "date_1" },
+    // Old per-day template schema ({ userId, dayOfWeek } unique) conflicts with
+    // the new master-recurrence schema where documents have no dayOfWeek.
+    { collection: "routinetemplates", index: "userId_1_dayOfWeek_1" },
   ];
 
   const db = mongoose.connection.db;

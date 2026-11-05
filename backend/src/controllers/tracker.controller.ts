@@ -1,330 +1,281 @@
 import type { Request, Response } from "express";
 import {
-  DAYS_OF_WEEK,
-  type DayOfWeek,
-  type HabitCategory,
-} from "../config/defaultSchedule";
-import {
   addCustomChecklistItem,
+  bulkDeleteRoutines,
+  createCategory,
+  createRoutine,
+  deleteCategory,
   getConsistencyStats,
   getMonthlyCalendar,
   getOrCreateDailyLog,
-  getTemplateByDay,
-  getWeeklyTemplates,
+  listCategories,
+  listRoutines,
   removeChecklistItem,
-  seedDefaultRoutines,
   setAllChecklistItems,
   toggleChecklistItem,
-  updateTemplateForDay,
+  updateRoutine,
 } from "../services/tracker.service";
+import { getWeeklyInsights } from "../services/insights.service";
 
-function isValidDayOfWeek(day: string): day is DayOfWeek {
-  return (DAYS_OF_WEEK as string[]).includes(day.toLowerCase());
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
-export async function handleGetWeeklyRoutines(req: Request, res: Response) {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+function statusFor(error: unknown): number {
+  const message = error instanceof Error ? error.message : "";
+  if (message.includes("not found")) return 404;
+  if (message.includes("already exists")) return 409;
+  return 400;
+}
 
-    const routines = await getWeeklyTemplates(userId);
-    res.json({ routines });
+function requireUserId(req: Request, res: Response): string | null {
+  const userId = req.user?.userId;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return null;
+  }
+  return userId;
+}
+
+// ---------------- Categories ----------------
+
+export async function handleListCategories(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    res.json({ categories: await listCategories(userId) });
   } catch (error) {
-    res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch weekly routines",
-    });
+    res.status(500).json({ error: errorMessage(error, "Failed to list categories") });
   }
 }
 
-export async function handleGetRoutineByDay(req: Request, res: Response) {
+export async function handleCreateCategory(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+    const { name, color, icon } = (req.body ?? {}) as {
+      name?: unknown;
+      color?: unknown;
+      icon?: unknown;
+    };
+    const category = await createCategory(userId, { name, color, icon });
+    res.status(201).json({ category });
+  } catch (error) {
+    res
+      .status(statusFor(error))
+      .json({ error: errorMessage(error, "Failed to create category") });
+  }
+}
 
-    const rawDay = String(req.params.dayOfWeek ?? "").toLowerCase();
-    if (!isValidDayOfWeek(rawDay)) {
-      res.status(400).json({
-        error: `Invalid dayOfWeek "${rawDay}". Must be one of: ${DAYS_OF_WEEK.join(", ")}`,
-      });
-      return;
-    }
+export async function handleDeleteCategory(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    res.json(await deleteCategory(userId, String(req.params.id ?? "")));
+  } catch (error) {
+    res
+      .status(statusFor(error))
+      .json({ error: errorMessage(error, "Failed to delete category") });
+  }
+}
 
-    const routine = await getTemplateByDay(userId, rawDay);
+// ---------------- Routines ----------------
+
+export async function handleListRoutines(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    res.json({ routines: await listRoutines(userId) });
+  } catch (error) {
+    res.status(500).json({ error: errorMessage(error, "Failed to list routines") });
+  }
+}
+
+export async function handleCreateRoutine(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const routine = await createRoutine(userId, (req.body ?? {}) as Record<string, unknown>);
+    res.status(201).json({ routine });
+  } catch (error) {
+    res
+      .status(statusFor(error))
+      .json({ error: errorMessage(error, "Failed to create routine") });
+  }
+}
+
+export async function handleUpdateRoutine(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const routine = await updateRoutine(
+      userId,
+      String(req.params.id ?? ""),
+      (req.body ?? {}) as Record<string, unknown>
+    );
     res.json({ routine });
   } catch (error) {
-    res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch routine template",
-    });
+    res
+      .status(statusFor(error))
+      .json({ error: errorMessage(error, "Failed to update routine") });
   }
 }
 
-export async function handleUpdateRoutineByDay(req: Request, res: Response) {
+export async function handleBulkDeleteRoutines(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const rawDay = String(req.params.dayOfWeek ?? "").toLowerCase();
-    if (!isValidDayOfWeek(rawDay)) {
-      res.status(400).json({
-        error: `Invalid dayOfWeek "${rawDay}". Must be one of: ${DAYS_OF_WEEK.join(", ")}`,
-      });
-      return;
-    }
-
-    const { items } = req.body as {
-      items?: Array<{ title: string; category?: HabitCategory }>;
-    };
-
-    if (!Array.isArray(items)) {
-      res
-        .status(400)
-        .json({ error: "`items` array is required in request body." });
-      return;
-    }
-
-    const updated = await updateTemplateForDay(
-      userId,
-      rawDay,
-      items.map((item) => ({
-        title: String(item.title ?? ""),
-        category: item.category ?? "routine",
-      }))
-    );
-
-    res.json({ routine: updated });
+    const result = await bulkDeleteRoutines(userId, (req.body ?? {}) as Record<string, unknown>);
+    res.json(result);
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to update routine template",
-    });
+    res
+      .status(statusFor(error))
+      .json({ error: errorMessage(error, "Failed to delete routines") });
   }
 }
 
-export async function handleResetRoutines(req: Request, res: Response) {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const routines = await seedDefaultRoutines(userId, true);
-    res.json({
-      message: "Weekly routine templates reset to default schedule",
-      routines,
-    });
-  } catch (error) {
-    res.status(500).json({
-      error:
-        error instanceof Error ? error.message : "Failed to reset routines",
-    });
-  }
-}
+// ---------------- Daily logs ----------------
 
 export async function handleGetDailyLog(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const date = String(req.params.date ?? "");
-    const log = await getOrCreateDailyLog(userId, date);
-    res.json({ log });
+    res.json({ log: await getOrCreateDailyLog(userId, String(req.params.date ?? "")) });
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to get daily checklist log",
-    });
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to get daily checklist log") });
   }
 }
 
 export async function handleToggleChecklistItem(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const date = String(req.params.date ?? "");
-    const itemId = String(req.params.itemId ?? "");
-    const { completed } = req.body as { completed?: boolean };
-
+    const { completed } = (req.body ?? {}) as { completed?: boolean };
     const log = await toggleChecklistItem(
       userId,
-      date,
-      itemId,
+      String(req.params.date ?? ""),
+      String(req.params.itemId ?? ""),
       typeof completed === "boolean" ? completed : undefined
     );
     res.json({ log });
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to toggle checklist item",
-    });
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to toggle checklist item") });
   }
 }
 
 export async function handleCheckAllItems(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const date = String(req.params.date ?? "");
-    const { completed } = req.body as { completed?: boolean };
-
+    const { completed } = (req.body ?? {}) as { completed?: boolean };
     if (typeof completed !== "boolean") {
-      res
-        .status(400)
-        .json({ error: "`completed` boolean is required in request body." });
+      res.status(400).json({ error: "`completed` boolean is required in request body." });
       return;
     }
-
-    const log = await setAllChecklistItems(userId, date, completed);
-    res.json({ log });
-  } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to update all checklist items",
+    res.json({
+      log: await setAllChecklistItems(userId, String(req.params.date ?? ""), completed),
     });
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to update all checklist items") });
   }
 }
 
+/** Quick add: creates a one-off routine for the given date. */
 export async function handleAddCustomItem(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const date = String(req.params.date ?? "");
-    const { title, category } = req.body as {
+    const { title, category } = (req.body ?? {}) as {
       title?: string;
-      category?: HabitCategory;
+      category?: unknown;
     };
-
     if (!title || !title.trim()) {
-      res
-        .status(400)
-        .json({ error: "`title` is required to add a checklist item." });
+      res.status(400).json({ error: "`title` is required to add a checklist item." });
       return;
     }
-
     const log = await addCustomChecklistItem(
       userId,
-      date,
+      String(req.params.date ?? ""),
       title,
-      category ?? "custom"
+      category
     );
     res.status(201).json({ log });
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error ? error.message : "Failed to add checklist item",
-    });
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to add checklist item") });
   }
 }
 
 export async function handleRemoveChecklistItem(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const date = String(req.params.date ?? "");
-    const itemId = String(req.params.itemId ?? "");
-    const log = await removeChecklistItem(userId, date, itemId);
+    const log = await removeChecklistItem(
+      userId,
+      String(req.params.date ?? ""),
+      String(req.params.itemId ?? "")
+    );
     res.json({ log });
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to remove checklist item",
-    });
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to remove checklist item") });
   }
 }
 
-export async function handleGetMonthlyCalendar(req: Request, res: Response) {
-  try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
+// ---------------- Calendar, stats, insights ----------------
 
+export async function handleGetMonthlyCalendar(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
     const now = new Date();
     const year = req.query.year ? Number(req.query.year) : now.getUTCFullYear();
-    const month = req.query.month
-      ? Number(req.query.month)
-      : now.getUTCMonth() + 1;
+    const month = req.query.month ? Number(req.query.month) : now.getUTCMonth() + 1;
 
     if (Number.isNaN(year) || Number.isNaN(month)) {
-      res
-        .status(400)
-        .json({ error: "Query parameters `year` and `month` must be numbers." });
+      res.status(400).json({ error: "Query parameters `year` and `month` must be numbers." });
       return;
     }
-
-    const calendar = await getMonthlyCalendar(userId, year, month);
-    res.json(calendar);
+    res.json(await getMonthlyCalendar(userId, year, month));
   } catch (error) {
-    res.status(400).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to generate monthly calendar",
-    });
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to generate monthly calendar") });
   }
 }
 
 export async function handleGetStats(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
-
-    const stats = await getConsistencyStats(userId);
-    res.json(stats);
+    res.json(await getConsistencyStats(userId));
   } catch (error) {
-    res.status(500).json({
-      error:
-        error instanceof Error
-          ? error.message
-          : "Failed to compute consistency stats",
-    });
+    res
+      .status(500)
+      .json({ error: errorMessage(error, "Failed to compute consistency stats") });
+  }
+}
+
+export async function handleGetWeeklyInsights(req: Request, res: Response) {
+  const userId = requireUserId(req, res);
+  if (!userId) return;
+  try {
+    const startDate =
+      typeof req.query.startDate === "string" ? req.query.startDate : undefined;
+    const forceRefresh =
+      req.query.forceRefresh === "true" || req.query.forceRefresh === "1";
+    res.json(await getWeeklyInsights(userId, startDate, forceRefresh));
+  } catch (error) {
+    res
+      .status(400)
+      .json({ error: errorMessage(error, "Failed to generate weekly insights") });
   }
 }

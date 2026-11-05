@@ -1,10 +1,11 @@
 import mongoose, { Schema, type Model, type Types } from "mongoose";
-import type { DayOfWeek, HabitCategory } from "../config/defaultSchedule";
+import type { CategoryInfo, DayOfWeek } from "../config/defaultSchedule";
 
 export interface IDailyChecklistItem {
   id: string;
+  routineId?: string;
   title: string;
-  category: HabitCategory;
+  category: CategoryInfo;
   completed: boolean;
   completedAt: string | null;
   order: number;
@@ -25,23 +26,14 @@ export interface IDailyLog {
   notes?: string;
 }
 
+// `category` is Mixed (no enum): it holds a user-defined { name, color, icon }
+// (or a legacy plain string in older documents, normalized on read).
 const DailyChecklistItemSchema = new Schema<IDailyChecklistItem>(
   {
     id: { type: String, required: true },
+    routineId: { type: String },
     title: { type: String, required: true, trim: true },
-    category: {
-      type: String,
-      enum: [
-        "routine",
-        "workout",
-        "school",
-        "study",
-        "chores",
-        "work",
-        "custom",
-      ] satisfies HabitCategory[],
-      default: "routine",
-    },
+    category: { type: Schema.Types.Mixed, default: null },
     completed: { type: Boolean, default: false },
     completedAt: { type: String, default: null },
     order: { type: Number, required: true },

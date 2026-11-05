@@ -1,11 +1,59 @@
-export type HabitCategory =
-  | "routine"
-  | "workout"
-  | "school"
-  | "study"
-  | "chores"
-  | "work"
-  | "custom";
+/** User-defined genre. `icon` is an identifier mapped to an emoji in lib/categories.ts. */
+export interface CategoryInfo {
+  name: string;
+  color: string;
+  icon: string;
+}
+
+export interface CategoryRecord extends CategoryInfo {
+  id: string;
+}
+
+export interface RoutineRecord {
+  id: string;
+  title: string;
+  category: CategoryInfo;
+  daysOfWeek: number[]; // 0 = Sunday .. 6 = Saturday
+  specificDate: string | null;
+  startDate: string;
+  active: boolean;
+}
+
+export interface HabitInsight {
+  habitId: string;
+  habitTitle: string;
+  category: CategoryInfo;
+  scheduledDaysCount: number;
+  completedDaysCount: number;
+  consistencyRate: number;
+  feedback: string;
+}
+
+export type CoachSource =
+  | "gemini-ai"
+  | "rule-based"
+  | "gemini"
+  | "heuristic";
+
+export interface WeeklyInsights {
+  weekStart: string;
+  weekEnd: string;
+  daysElapsed: number;
+  disciplineScore: number;
+  totalScheduled: number;
+  totalCompleted: number;
+  bestHabit: { title: string; consistencyRate: number } | null;
+  weakestHabit: { title: string; consistencyRate: number } | null;
+  habits: HabitInsight[];
+  source?: CoachSource;
+  insightText?: string;
+  coach: {
+    source: CoachSource;
+    summary: string;
+    insightText?: string;
+    fallbackReason?: string;
+  };
+}
 
 export type DayOfWeek =
   | "sunday"
@@ -66,8 +114,9 @@ export interface WorkspaceCard {
 
 export interface DailyChecklistItem {
   id: string;
+  routineId?: string;
   title: string;
-  category: HabitCategory;
+  category: CategoryInfo;
   completed: boolean;
   completedAt: string | null;
   order: number;

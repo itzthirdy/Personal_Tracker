@@ -4,13 +4,19 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import HeatmapCalendar from "@/components/HeatmapCalendar";
 import DailyChecklist from "@/components/DailyChecklist";
+import RoutineManagerModal from "@/components/RoutineManagerModal";
+import WeeklyInsightsCard from "@/components/WeeklyInsightsCard";
+import { dayIndexOf, mondayOf } from "@/lib/categories";
 import {
-  apiAddCustomHabitItem,
+  apiCreateCategory,
+  apiCreateRoutine,
+  apiDeleteCategory,
   apiRemoveHabitItem,
   apiSetAllHabitItems,
   apiToggleHabitItem,
   buildFallbackCalendar,
   buildFallbackDailyLog,
+  fetchCategories,
   fetchDailyLog,
   fetchMonthlyCalendar,
   fetchStats,
@@ -19,9 +25,10 @@ import {
 import {
   computeGithubShade,
   type AuthUser,
+  type CategoryInfo,
+  type CategoryRecord,
   type ConsistencyStats,
   type DailyLog,
-  type HabitCategory,
   type MonthlyCalendarResponse,
 } from "@/types/tracker";
 
@@ -53,6 +60,9 @@ export default function HabitsInsideWindowPage() {
   const [stats, setStats] = useState<ConsistencyStats | null>(null);
   const [backendConnected, setBackendConnected] = useState<boolean>(true);
   const [loadingLog, setLoadingLog] = useState<boolean>(false);
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
+  const [managerOpen, setManagerOpen] = useState<boolean>(false);
+  const [insightsSignal, setInsightsSignal] = useState<number>(0);
 
   // Sync client's real current date and user session inside useEffect (after mount)
   useEffect(() => {
@@ -211,6 +221,7 @@ export default function HabitsInsideWindowPage() {
         syncLogIntoCalendar(serverLog);
         setBackendConnected(true);
         refreshStats();
+        setInsightsSignal((n) => n + 1);
       } catch {
         setBackendConnected(false);
       }
@@ -249,6 +260,7 @@ export default function HabitsInsideWindowPage() {
         syncLogIntoCalendar(serverLog);
         setBackendConnected(true);
         refreshStats();
+        setInsightsSignal((n) => n + 1);
       } catch {
         setBackendConnected(false);
       }
@@ -256,54 +268,108 @@ export default function HabitsInsideWindowPage() {
     [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
   );
 
-  const handleAddCustomItem = useCallback(
-    async (title: string, category: HabitCategory) => {
-      try {
-        const serverLog = await apiAddCustomHabitItem(
-          selectedDate,
-          title,
-          category
-        );
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        setBackendConnected(true);
-        refreshStats();
-      } catch {
-        const nextOrder =
-          dailyLog.items.reduce((max, i) => Math.max(max, i.order), 0) + 1;
-        const nextItems = [
-          ...dailyLog.items,
-          {
-            id: `custom-${nextOrder}`,
-            title,
-            category,
-            completed: false,
-            completedAt: null,
-            order: nextOrder,
-          },
-        ];
-        const shade = computeGithubShade(
-          dailyLog.completedCount,
-          nextItems.length
-        );
-        const optimisticLog: DailyLog = {
-          ...dailyLog,
-          items: nextItems,
-          totalCount: nextItems.length,
-          completionPercentage: shade.percentage,
-          shadeLevel: shade.level,
-          shadeColor: shade.color,
-          shadeLabel: shade.label,
-        };
-        setDailyLog(optimisticLog);
-        syncLogIntoCalendar(optimisticLog);
-      }
+  // Reload the selected day + month heatmap from the server (after schedule changes)
+  const reloadDay = useCallback(async () => {
+    try {
+      const [log, cal] = await Promise.all([
+        fetchDailyLog(selectedDate),
+        fetchMonthlyCalendar(year, month),
+      ]);
+      setDailyLog(log);
+      setCalendar(cal);
+      setBackendConnected(true);
+      refreshStats();
+    } catch {
+      setBackendConnected(false);
+    }
+    setInsightsSignal((n) => n + 1);
+  }, [selectedDate, year, month, refreshStats]);
+
+  // Load the user's custom genres once
+  useEffect(() => {
+    let active = true;
+    fetchCategories()
+      .then((list) => {
+        if (active) setCategories(list);
+      })
+      .catch(() => {
+        // offline: keep empty list
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleCreateCategory = useCallback(
+    async (input: CategoryInfo): Promise<CategoryRecord> => {
+      const created = await apiCreateCategory(input);
+      setCategories((prev) => [...prev, created]);
+      return created;
     },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
+    []
+  );
+
+  const handleDeleteCategory = useCallback(
+    async (idOrName: string, categoryName: string) => {
+      const targetLower = categoryName.toLowerCase();
+      if (targetLower === "general") return;
+
+      // Optimistically remove the custom genre pill and fall back matching items to General
+      setCategories((prev) =>
+        prev.filter(
+          (c) => c.id !== idOrName && c.name.toLowerCase() !== targetLower
+        )
+      );
+      setDailyLog((prev) => ({
+        ...prev,
+        items: prev.items.map((item) =>
+          item.category.name.toLowerCase() === targetLower
+            ? {
+                ...item,
+                category: {
+                  name: "General",
+                  color: "#801E0F",
+                  icon: "sparkles",
+                },
+              }
+            : item
+        ),
+      }));
+
+      try {
+        await apiDeleteCategory(idOrName);
+      } catch {
+        // resync below
+      }
+      await reloadDay();
+    },
+    [reloadDay]
+  );
+
+  const handleCreateRoutine = useCallback(
+    async (input: {
+      title: string;
+      category: CategoryInfo | null;
+      repeat: boolean;
+    }) => {
+      await apiCreateRoutine({
+        title: input.title,
+        category: input.category,
+        ...(input.repeat
+          ? {
+              daysOfWeek: [dayIndexOf(selectedDate)],
+              startDate: mondayOf(selectedDate),
+            }
+          : { specificDate: selectedDate }),
+      });
+      await reloadDay();
+    },
+    [selectedDate, reloadDay]
   );
 
   const handleRemoveItem = useCallback(
     async (itemId: string) => {
+      // Optimistic removal; the server decides what is deleted vs. preserved.
       const nextItems = dailyLog.items.filter((i) => i.id !== itemId);
       const completedCount = nextItems.filter((i) => i.completed).length;
       const shade = computeGithubShade(completedCount, nextItems.length);
@@ -321,15 +387,13 @@ export default function HabitsInsideWindowPage() {
       syncLogIntoCalendar(optimisticLog);
 
       try {
-        const serverLog = await apiRemoveHabitItem(selectedDate, itemId);
-        setDailyLog(serverLog);
-        syncLogIntoCalendar(serverLog);
-        refreshStats();
+        await apiRemoveHabitItem(selectedDate, itemId);
       } catch {
-        // keep optimistic state if backend offline
+        // fall through to reload to resync with the server
       }
+      await reloadDay();
     },
-    [dailyLog, selectedDate, syncLogIntoCalendar, refreshStats]
+    [dailyLog, selectedDate, syncLogIntoCalendar, reloadDay]
   );
 
   const handlePrevMonth = () => {
@@ -511,14 +575,41 @@ export default function HabitsInsideWindowPage() {
             <DailyChecklist
               log={dailyLog}
               loading={loadingLog}
+              categories={categories}
               onToggleItem={handleToggleItem}
               onSetAllItems={handleSetAllItems}
-              onAddCustomItem={handleAddCustomItem}
+              onCreateRoutine={handleCreateRoutine}
+              onCreateCategory={handleCreateCategory}
+              onDeleteCategory={handleDeleteCategory}
               onRemoveItem={handleRemoveItem}
+              onOpenManager={() => setManagerOpen(true)}
             />
           </div>
         </section>
+
+        {/* 3. Weekly Consistency & AI Coach */}
+        <WeeklyInsightsCard
+          weekAnchorDate={selectedDate}
+          refreshSignal={insightsSignal}
+          onSelectWeekDate={(mondayDate) => {
+            setSelectedDate(mondayDate);
+            setYear(Number(mondayDate.slice(0, 4)));
+            setMonth(Number(mondayDate.slice(5, 7)));
+          }}
+        />
       </main>
+
+      {managerOpen && (
+        <RoutineManagerModal
+          open
+          onClose={() => setManagerOpen(false)}
+          categories={categories}
+          onCreateCategory={handleCreateCategory}
+          onDeleteCategory={handleDeleteCategory}
+          startDate={mondayOf(selectedDate)}
+          onChanged={reloadDay}
+        />
+      )}
     </div>
   );
 }

@@ -3,7 +3,6 @@ import { isDatabaseConnected } from "../config/database";
 import { signJwtToken } from "../middleware/auth.middleware";
 import { UserModel, type IUser, type PublicUserProfile } from "../models/User";
 import { seedDefaultWorkspaceCards } from "./hub.service";
-import { seedDefaultRoutines } from "./tracker.service";
 
 // In-memory fallback store for users when MongoDB is not connected
 const memoryUsersById = new Map<string, IUser>();
@@ -86,11 +85,9 @@ export async function registerUser(
 
   const userId = String(createdUser._id);
 
-  // Automatically seed default Monday–Sunday routine templates & 3 Workspace Hub Cards
-  await Promise.all([
-    seedDefaultRoutines(userId, false),
-    seedDefaultWorkspaceCards(userId, false),
-  ]);
+  // Zero-state onboarding: only the 3 default Workspace Hub cards are seeded.
+  // The user's habit/routine list starts completely empty.
+  await seedDefaultWorkspaceCards(userId, false);
 
   const userProfile = toPublicProfile(createdUser);
   const token = signJwtToken({

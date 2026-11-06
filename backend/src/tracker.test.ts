@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, it } from "bun:test";
 import { Duplex } from "node:stream";
 import { IncomingMessage, ServerResponse } from "node:http";
 import app from "./app";
@@ -181,7 +181,8 @@ describe("Auth & zero-state onboarding", () => {
     });
     expect(hub.body.cards.map((c) => c.title)).toEqual([
       "Routine & Habit Tracker",
-      "Finances",
+      "Calendar",
+      "Finance",
       "Exercise",
     ]);
   });
@@ -704,7 +705,8 @@ describe("Hub + multi-tenant isolation", () => {
       currentStreak: 1,
       todayProgress: { completionPercentage: 100 },
     });
-    expect(hub.body.cards[1]!.livePreview).toEqual({ subtitle: "Coming Soon" });
+    expect(hub.body.cards[1]!.livePreview).toEqual({ subtitle: "Schedule & Events" });
+    expect(hub.body.cards[2]!.livePreview).toEqual({ subtitle: "Coming Soon" });
 
     const created = await requestApp<{ card: { id: string; order: number } }>(
       "/api/hub/cards",
@@ -715,7 +717,7 @@ describe("Hub + multi-tenant isolation", () => {
       }
     );
     expect(created.status).toBe(201);
-    expect(created.body.card.order).toBe(4);
+    expect(created.body.card.order).toBe(5);
 
     const patched = await requestApp<{ card: { title: string } }>(
       `/api/hub/cards/${created.body.card.id}`,
@@ -796,5 +798,121 @@ describe("Hub + multi-tenant isolation", () => {
       { headers: a.auth }
     );
     expect(aAfter.body.routines.map((r) => r.title)).toEqual(["Alice Private Habit"]);
+  });
+});
+
+describe("Calendar Engine & Recurrence Expansion", () => {
+  it("creates, retrieves, expands recurrence, updates, and deletes calendar events", async () => {
+    const user = await registerTestUser("cal_tester");
+
+    // 1. Create a non-recurring event
+    const single = await requestApp<{ event: { _id: string; title: string } }>(
+      "/api/calendar/events",
+      {
+        method: "POST",
+        headers: user.auth,
+        body: {
+          title: "Doctor Appointment",
+          startDate: "2026-11-10",
+          startTime: "10:00",
+          endTime: "11:00",
+          notes: "Annual checkup",
+        },
+      }
+    );
+    expect(single.status).toBe(201);
+    expect(single.body.event.title).toBe("Doctor Appointment");
+
+    // 2. Reject if endTime <= startTime
+    const invalidTime = await requestApp<{ error: string }>(
+      "/api/calendar/events",
+      {
+        method: "POST",
+        headers: user.auth,
+        body: {
+          title: "Invalid Times",
+          startDate: "2026-11-10",
+          startTime: "14:00",
+          endTime: "13:00",
+        },
+      }
+    );
+    expect(invalidTime.status).toBe(400);
+
+    // 3. Create weekly recurring event (MWF)
+    const weekly = await requestApp<{ event: { _id: string } }>(
+      "/api/calendar/events",
+      {
+        method: "POST",
+        headers: user.auth,
+        body: {
+          title: "Software Engineering 2",
+          startDate: "2026-11-02",
+          startTime: "09:00",
+          endTime: "10:30",
+          recurrence: "weekly",
+          daysOfWeek: [1, 3, 5], // Mon, Wed, Fri
+        },
+      }
+    );
+    expect(weekly.status).toBe(201);
+
+    // 4. Query events across a 2-week window (2026-11-01 to 2026-11-14)
+    const res = await requestApp<{ events: Array<{ id: string; title: string; startDate: string; recurrence: string }> }>(
+      "/api/calendar/events?start=2026-11-01&end=2026-11-14",
+      { headers: user.auth }
+    );
+    expect(res.status).toBe(200);
+
+    // The weekly event should have instances on Mon, Wed, Fri for 2 weeks = 6 instances
+    const sweInstances = res.body.events.filter((e) => e.title === "Software Engineering 2");
+    expect(sweInstances.length).toBe(6);
+    expect(sweInstances.map((e) => e.startDate)).toEqual([
+      "2026-11-02", // Mon
+      "2026-11-04", // Wed
+      "2026-11-06", // Fri
+      "2026-11-09", // Mon
+      "2026-11-11", // Wed
+      "2026-11-13", // Fri
+    ]);
+
+    // Single event is also present on 2026-11-10
+    const docInstance = res.body.events.find((e) => e.title === "Doctor Appointment");
+    expect(docInstance).toBeDefined();
+    expect(docInstance?.startDate).toBe("2026-11-10");
+
+    // 5. Update event
+    const updated = await requestApp<{ event: { title: string; startTime: string } }>(
+      `/api/calendar/events/${single.body.event._id}`,
+      {
+        method: "PUT",
+        headers: user.auth,
+        body: {
+          title: "Dentist Appointment",
+          startTime: "10:30",
+          endTime: "11:30",
+        },
+      }
+    );
+    expect(updated.status).toBe(200);
+    expect(updated.body.event.title).toBe("Dentist Appointment");
+
+    // 6. Delete event
+    const del = await requestApp<{ success: boolean; deletedId: string }>(
+      `/api/calendar/events/${single.body.event._id}`,
+      {
+        method: "DELETE",
+        headers: user.auth,
+      }
+    );
+    expect(del.status).toBe(200);
+    expect(del.body.success).toBe(true);
+
+    // After deletion, event should no longer appear in query
+    const afterDel = await requestApp<{ events: Array<{ title: string }> }>(
+      "/api/calendar/events?start=2026-11-01&end=2026-11-14",
+      { headers: user.auth }
+    );
+    expect(afterDel.body.events.some((e) => e.title === "Dentist Appointment")).toBe(false);
   });
 });

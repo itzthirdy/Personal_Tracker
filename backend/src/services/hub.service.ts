@@ -36,13 +36,27 @@ function buildDefaultWorkspaceCards(userId: string): IWorkspaceCard[] {
     {
       _id: new mongoose.Types.ObjectId().toString(),
       userId,
-      title: "Finances",
-      moduleKey: "finances",
+      title: "Calendar",
+      moduleKey: "calendar",
+      icon: "calendar",
+      coverImage:
+        "https://images.unsplash.com/photo-1506784983877-45594efa4cbe?auto=format&fit=crop&w=1200&q=80",
+      route: "/dashboard/calendar",
+      order: 2,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      _id: new mongoose.Types.ObjectId().toString(),
+      userId,
+      title: "Finance",
+      moduleKey: "finance",
       icon: "wallet",
       coverImage:
         "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1200&q=80",
-      route: "/dashboard/finances",
-      order: 2,
+      route: "/dashboard/finance",
+      order: 3,
       status: "coming_soon",
       createdAt: now,
       updatedAt: now,
@@ -56,7 +70,7 @@ function buildDefaultWorkspaceCards(userId: string): IWorkspaceCard[] {
       coverImage:
         "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80",
       route: "/dashboard/exercise",
-      order: 3,
+      order: 4,
       status: "coming_soon",
       createdAt: now,
       updatedAt: now,
@@ -91,6 +105,12 @@ async function computeLivePreviewForCard(
         totalCount: todayLog.totalCount,
         completionPercentage: todayLog.completionPercentage,
       },
+    };
+  }
+
+  if (moduleKey === "calendar") {
+    return {
+      subtitle: "Schedule & Events",
     };
   }
 

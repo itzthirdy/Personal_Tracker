@@ -1,6 +1,12 @@
 import mongoose, { Schema, type Model, type Types } from "mongoose";
 
-export type WorkspaceModuleKey = "habits" | "finances" | "exercise" | "custom";
+export type WorkspaceModuleKey =
+  | "habits"
+  | "calendar"
+  | "finances"
+  | "finance"
+  | "exercise"
+  | "custom";
 export type WorkspaceCardStatus = "active" | "coming_soon";
 
 export interface IWorkspaceCard {

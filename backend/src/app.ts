@@ -4,6 +4,7 @@ import { connectDatabase, isDatabaseConnected } from "./config/database";
 import authRoutes from "./routes/auth.routes";
 import hubRoutes from "./routes/hub.routes";
 import trackerRoutes from "./routes/tracker.routes";
+import calendarRoutes from "./routes/calendar.routes";
 
 const app = express();
 
@@ -70,5 +71,8 @@ app.use("/api/hub", hubRoutes);
 app.use("/api/tracker", trackerRoutes);
 app.use("/api/habits", trackerRoutes);
 app.use("/api", trackerRoutes);
+
+// Schedule & Calendar routes
+app.use("/api/calendar", calendarRoutes);
 
 export default app;

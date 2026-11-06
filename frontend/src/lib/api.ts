@@ -3,9 +3,11 @@ import {
   type AuthResponse,
   type AuthUser,
   type CalendarDaySummary,
-  type ConsistencyStats,
+  type CalendarEventInput,
+  type CalendarEventItem,
   type CategoryInfo,
   type CategoryRecord,
+  type ConsistencyStats,
   type DailyLog,
   type DayOfWeek,
   type MonthlyCalendarResponse,
@@ -140,15 +142,28 @@ export function getFallbackWorkspaceCards(): WorkspaceCard[] {
       },
     },
     {
-      id: "fallback-finances",
+      id: "fallback-calendar",
       userId: "local",
-      title: "Finances",
-      moduleKey: "finances",
+      title: "Calendar",
+      moduleKey: "calendar",
+      icon: "calendar",
+      coverImage:
+        "https://images.unsplash.com/photo-1506784983877-45594efa4cbe?auto=format&fit=crop&w=1200&q=80",
+      route: "/dashboard/calendar",
+      order: 2,
+      status: "active",
+      livePreview: { subtitle: "Schedule & Events" },
+    },
+    {
+      id: "fallback-finance",
+      userId: "local",
+      title: "Finance",
+      moduleKey: "finance",
       icon: "wallet",
       coverImage:
         "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=1200&q=80",
-      route: "/dashboard/finances",
-      order: 2,
+      route: "/dashboard/finance",
+      order: 3,
       status: "coming_soon",
       livePreview: { subtitle: "Coming Soon" },
     },
@@ -161,7 +176,7 @@ export function getFallbackWorkspaceCards(): WorkspaceCard[] {
       coverImage:
         "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80",
       route: "/dashboard/exercise",
-      order: 3,
+      order: 4,
       status: "coming_soon",
       livePreview: { subtitle: "Coming Soon" },
     },
@@ -492,4 +507,72 @@ export function fetchWeeklyInsights(
     params.set("t", String(Date.now()));
   }
   return trackerRequest(`/insights/weekly?${params.toString()}`);
+}
+
+// ==========================================
+// 4. Calendar & Schedule API
+// ==========================================
+
+const CALENDAR_API = `${API_BASE_URL}/calendar`;
+
+export async function fetchCalendarEvents(
+  start?: string,
+  end?: string
+): Promise<CalendarEventItem[]> {
+  const params = new URLSearchParams();
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  const query = params.toString() ? `?${params.toString()}` : "";
+
+  const res = await fetch(`${CALENDAR_API}/events${query}`, {
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch calendar events: ${res.status}`);
+  }
+  const data = (await res.json()) as { events: CalendarEventItem[] };
+  return data.events || [];
+}
+
+export async function apiCreateCalendarEvent(
+  input: CalendarEventInput
+): Promise<CalendarEventItem> {
+  const res = await fetch(`${CALENDAR_API}/events`, {
+    method: "POST",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error ?? `Failed to create event (${res.status})`);
+  }
+  return data.event as CalendarEventItem;
+}
+
+export async function apiUpdateCalendarEvent(
+  id: string,
+  updates: Partial<CalendarEventInput>
+): Promise<CalendarEventItem> {
+  const res = await fetch(`${CALENDAR_API}/events/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error ?? `Failed to update event (${res.status})`);
+  }
+  return data.event as CalendarEventItem;
+}
+
+export async function apiDeleteCalendarEvent(id: string): Promise<void> {
+  const res = await fetch(`${CALENDAR_API}/events/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error ?? `Failed to delete event (${res.status})`);
+  }
 }

@@ -39,18 +39,24 @@ export default function ModuleContent() {
             the Routine &amp; Habit Tracker to log your daily consistency!
           </p>
 
-          <div className="mt-6 flex items-center justify-center gap-3">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/dashboard"
               className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#21262d] hover:bg-[#30363d] text-gray-200 border border-[#30363d]"
             >
-              ← My Dashboard
+              ← Workspace Hub
+            </Link>
+            <Link
+              href="/dashboard/calendar"
+              className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#21262d] hover:bg-[#30363d] text-gray-200 border border-[#30363d]"
+            >
+              Calendar
             </Link>
             <Link
               href="/dashboard/habits"
               className="px-4 py-2 rounded-lg text-xs font-bold bg-[#39d353] text-[#090d16] hover:bg-[#26a641] hover:text-white"
             >
-              Open Habit Tracker →
+              Habit Tracker →
             </Link>
           </div>
         </div>

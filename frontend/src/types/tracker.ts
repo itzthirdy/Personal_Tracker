@@ -78,7 +78,13 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
-export type WorkspaceModuleKey = "habits" | "finances" | "exercise" | "custom";
+export type WorkspaceModuleKey =
+  | "habits"
+  | "calendar"
+  | "finances"
+  | "finance"
+  | "exercise"
+  | "custom";
 export type WorkspaceCardStatus = "active" | "coming_soon";
 
 export interface HabitsLivePreview {
@@ -234,3 +240,38 @@ export function computeGithubShade(
     percentage,
   };
 }
+
+// ==========================================
+// Calendar & Schedule Types
+// ==========================================
+
+export type CalendarRecurrence = "none" | "daily" | "weekly" | "weekdays";
+
+export interface CalendarEventItem {
+  id: string;
+  eventId: string;
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string;
+  startTime: string; // HH:mm (24-hour)
+  endTime: string; // HH:mm (24-hour)
+  categoryId?: string | null;
+  category?: CategoryInfo | null;
+  notes?: string;
+  recurrence: CalendarRecurrence;
+  daysOfWeek?: number[];
+  isRecurringInstance?: boolean;
+}
+
+export interface CalendarEventInput {
+  title: string;
+  startDate: string;
+  endDate?: string;
+  startTime: string;
+  endTime: string;
+  categoryId?: string | null;
+  notes?: string;
+  recurrence?: CalendarRecurrence;
+  daysOfWeek?: number[];
+}
+
